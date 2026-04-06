@@ -1,9 +1,25 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { LineChart, Line, BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, ReferenceLine } from "recharts";
+import { initializeApp } from "firebase/app";
+import { getDatabase, ref, set, get, onValue } from "firebase/database";
+
+// ── FIREBASE CONFIG ────────────────────────────────────────────────────────────
+const firebaseConfig = {
+  apiKey: "AIzaSyDbLEYKeJw0667KPnMKLnwdALK_UB71XtM",
+  authDomain: "ibersilos-c6053.firebaseapp.com",
+  databaseURL: "https://ibersilos-c6053-default-rtdb.europe-west1.firebasedatabase.app",
+  projectId: "ibersilos-c6053",
+  storageBucket: "ibersilos-c6053.firebasestorage.app",
+  messagingSenderId: "1073852027153",
+  appId: "1:1073852027153:web:4a9421ddbb2b72143bbcb0"
+};
+const firebaseApp = initializeApp(firebaseConfig);
+const db = getDatabase(firebaseApp);
+const DATA_REF = "finance/AC001/data";
 
 // ── CONSTANTS ─────────────────────────────────────────────────────────────────
 const CLIENTS = ["Buzzatti", "Coder SA", "Molino dalla Giovanna", "Presta Silo", "Altro"];
-const SUPPLIERS = ["CCI Italia SRLS", "BMB Trasporti", "T-Way (renting)", "La Clau Assessors", "Gestrams (Alma Bianca 2018 SL)", "DKV", "E100", "MTO Logistics", "Truck Service Srl", "Altro"];
+const SUPPLIERS = ["CCI Italia SRLS", "BMB Trasporti", "T-Way (renting)", "La Clau Assessors", "Gestrams", "Alma Bianca 2018 SL", "DKV", "E100", "MTO Logistics", "Truck Service Srl", "Altro"];
 const IVA_TYPES = { "21%": 0.21, "RC (reverse charge)": 0, "Esente": 0, "0%": 0 };
 const IBKR_ETFS = ["VWCE", "VUAA", "SEC0", "C50", "Altro"];
 const STORAGE_KEY = "iber-silos-v2";
@@ -77,22 +93,26 @@ function calcAmortAccumulated(asset, upToYear) {
   return Math.min(total, asset.costEur);
 }
 
-// ── STORAGE ───────────────────────────────────────────────────────────────────
+// ── STORAGE — Firebase Realtime Database ──────────────────────────────────────
 async function loadData() {
   try {
-    const res = localStorage.getItem(STORAGE_KEY);
-    if (res) {
-      const d = JSON.parse(res);
+    const snapshot = await get(ref(db, DATA_REF));
+    if (snapshot.exists()) {
+      const d = snapshot.val();
       if (!d.asientos) d.asientos = [];
       if (!d.fixedAssets) d.fixedAssets = DEFAULT_ASSETS;
       if (!d.ibkrPositions) d.ibkrPositions = [];
+      if (!d.invoices) d.invoices = [];
+      if (!d.movements) d.movements = [];
       return d;
     }
-  } catch {}
+  } catch (e) { console.error("Firebase load error:", e); }
   return { invoices: [], movements: [], ibkrPositions: [], asientos: [], fixedAssets: DEFAULT_ASSETS };
 }
 async function saveData(data) {
-  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(data)); } catch {}
+  try {
+    await set(ref(db, DATA_REF), data);
+  } catch (e) { console.error("Firebase save error:", e); }
 }
 
 // ── RECONCILIATION ────────────────────────────────────────────────────────────
@@ -331,7 +351,7 @@ export default function IberSilosApp() {
       const newMovs = parsed.filter(m => !existing.has(`${m.date}-${m.amount}-${m.description}`));
       if (!newMovs.length) { showToast("Sin movimientos nuevos", "warn"); return; }
       persist({ ...data, movements: [...data.movements, ...newMovs] });
-      showToast(`Importati ${newMovs.length} movimenti`);
+      showToast(`Importados ${newMovs.length} movimientos`);
     };
     reader.readAsText(file); e.target.value = "";
   };
@@ -468,7 +488,7 @@ export default function IberSilosApp() {
         {/* ── SIDEBAR NAV ── */}
         <aside style={{ width:200, background:"white", borderRight:"1px solid #E0E0E0", display:"flex", flexDirection:"column", flexShrink:0, overflowY:"auto" }}>
           <div style={{ padding:"10px 0", borderBottom:"1px solid #F5F5F5" }}>
-            <div style={{ fontSize:9, fontWeight:700, letterSpacing:"2px", textTransform:"uppercase", color:"#bbb", padding:"4px 16px 8px" }}>Navigazione</div>
+            <div style={{ fontSize:9, fontWeight:700, letterSpacing:"2px", textTransform:"uppercase", color:"#bbb", padding:"4px 16px 8px" }}>Navegación</div>
             {TABS.map(([id, icon, label]) => (
               <button key={id} className={`nav-item ${tab===id?"active":""}`} onClick={() => setTab(id)}>
                 <span style={{ fontSize:15 }}>{icon}</span>
@@ -491,7 +511,7 @@ export default function IberSilosApp() {
                 <div className="kpi-card green"><div className="kpi-label">Margen bruto</div><div className="kpi-value" style={{ color:metrics.margine>=0?"#28a745":"#E30613" }}>{fmt(metrics.margine)} <span style={{ fontSize:14, color:"#999" }}>{metrics.marginePerc.toFixed(1)}%</span></div></div>
                 <div className="kpi-card yellow"><div className="kpi-label">Créditos abiertos</div><div className="kpi-value" style={{ color:"#b8860b" }}>{fmt(metrics.creditiAperti)}</div></div>
                 <div className="kpi-card gray"><div className="kpi-label">Deudas abiertas</div><div className="kpi-value" style={{ color:"#666" }}>{fmt(metrics.debitiAperti)}</div></div>
-                <div className="kpi-card blue"><div className="kpi-label">Liquidez stimata</div><div className="kpi-value" style={{ color:metrics.liquidita>=0?"#3949ab":"#E30613" }}>{fmt(metrics.liquidita)}</div></div>
+                <div className="kpi-card blue"><div className="kpi-label">Liquidez estimada</div><div className="kpi-value" style={{ color:metrics.liquidita>=0?"#3949ab":"#E30613" }}>{fmt(metrics.liquidita)}</div></div>
               </div>
               <div className="card" style={{ marginBottom:16 }}>
                 <div style={{ fontSize:10, fontWeight:700, letterSpacing:"1.5px", textTransform:"uppercase", color:"#bbb", marginBottom:12 }}>Previsión liquidez 90 días</div>
