@@ -18,9 +18,9 @@ const db = getDatabase(firebaseApp);
 const DATA_REF = "finance/AC001/data";
 
 // ── CONSTANTS ─────────────────────────────────────────────────────────────────
-const CLIENTS = ["Buzzatti", "Coder SA", "Molino dalla Giovanna", "Presta Silo", "Altro"];
+const CLIENTS = ["Buzzatti", "Coder SA (Svizzera — art.21)", "Molino dalla Giovanna", "Altro"];
 const SUPPLIERS = ["CCI Italia SRLS", "BMB Trasporti", "T-Way (renting)", "La Clau Assessors", "Gestrams", "Alma Bianca 2018 SL", "DKV", "E100", "MTO Logistics", "Truck Service Srl", "Altro"];
-const IVA_TYPES = { "21%": 0.21, "RC (reverse charge)": 0, "Esente": 0, "0%": 0 };
+const IVA_TYPES = { "21%": 0.21, "10%": 0.10, "7%": 0.07, "RC (reverse charge)": 0, "Esente": 0, "0%": 0 };
 const IBKR_ETFS = ["VWCE", "VUAA", "SEC0", "C50", "Altro"];
 const STORAGE_KEY = "iber-silos-v2";
 
@@ -1260,7 +1260,7 @@ function MovementTable({ movements, invoices, onEdit, onDelete, onReconcile }) {
 }
 
 function InvoiceModal({ inv, onSave, onClose }) {
-  const IVA_TYPES_KEYS = { "21%": 0.21, "RC (reverse charge)": 0, "Esente": 0, "0%": 0 };
+  const IVA_TYPES_KEYS = { "21%": 0.21, "10%": 0.10, "7%": 0.07, "RC (reverse charge)": 0, "Esente": 0, "0%": 0 };
   const [form, setForm] = useState({ ...inv });
   const set = (k, v) => setForm(f => {
     const updated = { ...f, [k]: v };
