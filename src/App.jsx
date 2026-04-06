@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { LineChart, Line, BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, ReferenceLine } from "recharts";
 
-// â”€â”€ CONSTANTS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── CONSTANTS ─────────────────────────────────────────────────────────────────
 const CLIENTS = ["Buzzatti", "Coder SA", "Molino dalla Giovanna", "Presta Silo", "Altro"];
 const SUPPLIERS = ["CCI Italia SRLS", "BMB Trasporti", "T-Way (renting)", "La Clau Assessors", "Gestrams", "DKV", "E100", "Altro"];
 const IVA_TYPES = { "21%": 0.21, "RC (reverse charge)": 0, "Esente": 0, "0%": 0 };
@@ -9,40 +9,40 @@ const IBKR_ETFS = ["VWCE", "VUAA", "SEC0", "C50", "Altro"];
 const STORAGE_KEY = "iber-silos-v2";
 
 const fmt = (n) => new Intl.NumberFormat("es-ES", { style: "currency", currency: "EUR", minimumFractionDigits: 2 }).format(n || 0);
-const fmtDate = (d) => d ? new Date(d).toLocaleDateString("it-IT") : "â€”";
+const fmtDate = (d) => d ? new Date(d).toLocaleDateString("it-IT") : "—";
 const today = () => new Date().toISOString().split("T")[0];
 const addDays = (d, n) => { const dt = new Date(d); dt.setDate(dt.getDate() + n); return dt.toISOString().split("T")[0]; };
 const getPacAmount = (ds) => { const d = new Date(ds); return (d.getFullYear() > 2026 || (d.getFullYear() === 2026 && d.getMonth() >= 6)) ? 500 : 300; };
 
-// â”€â”€ PGC ACCOUNTS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── PGC ACCOUNTS ──────────────────────────────────────────────────────────────
 const PGC_ACCOUNTS = [
   { code:"100", name:"Capital social", group:"1", tipo:"pasivo" },
   { code:"112", name:"Reserva legal", group:"1", tipo:"pasivo" },
   { code:"120", name:"Remanente", group:"1", tipo:"pasivo" },
   { code:"129", name:"Resultado del ejercicio (PyG)", group:"1", tipo:"pasivo" },
   { code:"224", name:"Maquinaria (compresores)", group:"2", tipo:"activo" },
-  { code:"217", name:"Equipos informÃ¡ticos", group:"2", tipo:"activo" },
-  { code:"281", name:"AmortizaciÃ³n acumulada inmovilizado material", group:"2", tipo:"activo_contra" },
+  { code:"217", name:"Equipos informáticos", group:"2", tipo:"activo" },
+  { code:"281", name:"Amortización acumulada inmovilizado material", group:"2", tipo:"activo_contra" },
   { code:"400", name:"Proveedores", group:"4", tipo:"pasivo" },
   { code:"430", name:"Clientes", group:"4", tipo:"activo" },
   { code:"472", name:"HP IVA soportado", group:"4", tipo:"activo" },
   { code:"477", name:"HP IVA repercutido", group:"4", tipo:"pasivo" },
   { code:"475", name:"HP acreedora por IS", group:"4", tipo:"pasivo" },
-  { code:"520", name:"Deudas CP con entidades de crÃ©dito", group:"5", tipo:"pasivo" },
+  { code:"520", name:"Deudas CP con entidades de crédito", group:"5", tipo:"pasivo" },
   { code:"551", name:"Cuenta corriente con socios", group:"5", tipo:"pasivo" },
-  { code:"572", name:"Bancos â€” Revolut Business", group:"5", tipo:"activo" },
-  { code:"5721", name:"Bancos â€” BBVA", group:"5", tipo:"activo" },
-  { code:"5722", name:"IBKR SL â€” Inversiones financieras", group:"5", tipo:"activo" },
-  { code:"621", name:"Arrendamientos y cÃ¡nones (renting/alquiler)", group:"6", tipo:"gasto" },
-  { code:"622", name:"Reparaciones y conservaciÃ³n", group:"6", tipo:"gasto" },
+  { code:"572", name:"Bancos — Revolut Business", group:"5", tipo:"activo" },
+  { code:"5721", name:"Bancos — BBVA", group:"5", tipo:"activo" },
+  { code:"5722", name:"IBKR SL — Inversiones financieras", group:"5", tipo:"activo" },
+  { code:"621", name:"Arrendamientos y cánones (renting/alquiler)", group:"6", tipo:"gasto" },
+  { code:"622", name:"Reparaciones y conservación", group:"6", tipo:"gasto" },
   { code:"623", name:"Servicios de profesionales independientes", group:"6", tipo:"gasto" },
-  { code:"624", name:"Transportes (subcontrataciÃ³n)", group:"6", tipo:"gasto" },
+  { code:"624", name:"Transportes (subcontratación)", group:"6", tipo:"gasto" },
   { code:"625", name:"Primas de seguros", group:"6", tipo:"gasto" },
   { code:"626", name:"Servicios bancarios y similares", group:"6", tipo:"gasto" },
   { code:"629", name:"Otros servicios", group:"6", tipo:"gasto" },
   { code:"640", name:"Sueldos y salarios", group:"6", tipo:"gasto" },
   { code:"642", name:"Seguridad Social a cargo empresa", group:"6", tipo:"gasto" },
-  { code:"681", name:"AmortizaciÃ³n del inmovilizado material", group:"6", tipo:"gasto" },
+  { code:"681", name:"Amortización del inmovilizado material", group:"6", tipo:"gasto" },
   { code:"705", name:"Prestaciones de servicios (agencia transporte)", group:"7", tipo:"ingreso" },
   { code:"706", name:"Ingresos por alquiler compresores", group:"7", tipo:"ingreso" },
   { code:"769", name:"Otros ingresos financieros", group:"7", tipo:"ingreso" },
@@ -50,7 +50,7 @@ const PGC_ACCOUNTS = [
 const ACC_MAP = {};
 PGC_ACCOUNTS.forEach(a => { ACC_MAP[a.code] = a; });
 
-// â”€â”€ FIXED ASSETS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── FIXED ASSETS ──────────────────────────────────────────────────────────────
 const DEFAULT_ASSETS = [
   { id:"comp1", name:"Compresor 1", account:"224", costEur:4000, dateAcq:"2025-01-20", rateAnnual:0.12 },
   { id:"comp2", name:"Compresor 2", account:"224", costEur:3000, dateAcq:"2025-01-20", rateAnnual:0.12 },
@@ -77,7 +77,7 @@ function calcAmortAccumulated(asset, upToYear) {
   return Math.min(total, asset.costEur);
 }
 
-// â”€â”€ STORAGE â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── STORAGE ───────────────────────────────────────────────────────────────────
 async function loadData() {
   try {
     const res = localStorage.getItem(STORAGE_KEY);
@@ -95,7 +95,7 @@ async function saveData(data) {
   try { localStorage.setItem(STORAGE_KEY, JSON.stringify(data)); } catch {}
 }
 
-// â”€â”€ RECONCILIATION â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── RECONCILIATION ────────────────────────────────────────────────────────────
 function autoReconcile(movements, invoices) {
   const updated = movements.map(m => ({ ...m }));
   updated.forEach(mov => {
@@ -114,7 +114,7 @@ function autoReconcile(movements, invoices) {
   return updated;
 }
 
-// â”€â”€ FORECAST â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── FORECAST ──────────────────────────────────────────────────────────────────
 function buildForecast(invoices, movements) {
   const baseDate = new Date();
   const lastBalance = movements.reduce((acc, m) => acc + (m.type === "entrata" ? 1 : -1) * (parseFloat(m.amount) || 0), 0);
@@ -136,7 +136,7 @@ function buildForecast(invoices, movements) {
   return points;
 }
 
-// â”€â”€ PARSE REVOLUT CSV â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── PARSE REVOLUT CSV ─────────────────────────────────────────────────────────
 function parseRevolutCSV(text) {
   const lines = text.trim().split("\n");
   const results = [];
@@ -150,7 +150,7 @@ function parseRevolutCSV(text) {
   return results;
 }
 
-// â”€â”€ DSP LOGO SVG â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── DSP LOGO SVG ──────────────────────────────────────────────────────────────
 const IbersilosLogo = ({ height = 42 }) => (
   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 78" style={{ height, width: "auto", display: "block" }}>
     <text x="2" y="38" fontFamily="'Arial Black','Arial Bold',Arial,sans-serif" fontWeight="900" fontSize="40" fill="white" stroke="black" strokeWidth="4" strokeLinejoin="round" paintOrder="stroke fill" letterSpacing="-1">IBER</text>
@@ -161,10 +161,10 @@ const IbersilosLogo = ({ height = 42 }) => (
   </svg>
 );
 
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// ══════════════════════════════════════════════════════════════════════════════
 // MAIN APP
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
-// â”€â”€ AUTH â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ══════════════════════════════════════════════════════════════════════════════
+// ── AUTH ──────────────────────────────────────────────────────────────────────
 const USERS = { 'AC001': '1974' };
 
 function LoginScreen({ onLogin }) {
@@ -202,7 +202,7 @@ function LoginScreen({ onLogin }) {
             <rect x="101" y="33" width="35" height="10" rx="5" fill="#F5C800" transform="rotate(-28 101 33)" />
             <rect x="104" y="18" width="30" height="9" rx="4.5" fill="#E30613" transform="rotate(-28 104 18)" />
           </svg>
-          <p style={{ color:'#aaa', fontSize:11, margin:0, letterSpacing:'0.8px', textTransform:'uppercase' }}>Gestione Finanziaria Â· Reus, Tarragona</p>
+          <p style={{ color:'#aaa', fontSize:11, margin:0, letterSpacing:'0.8px', textTransform:'uppercase' }}>Gestione Finanziaria · Reus, Tarragona</p>
         </div>
 
         {/* Body */}
@@ -219,7 +219,7 @@ function LoginScreen({ onLogin }) {
           <div style={{ marginBottom:16 }}>
             <label style={{ display:'block', fontSize:10, fontWeight:700, color:'#999', textTransform:'uppercase', letterSpacing:'0.8px', marginBottom:6 }}>Password</label>
             <input
-              id="ibs-pw" type="password" value={pw} placeholder="â€¢â€¢â€¢â€¢"
+              id="ibs-pw" type="password" value={pw} placeholder="••••"
               onChange={e => setPw(e.target.value)}
               onKeyDown={e => e.key === 'Enter' && doLogin()}
               style={{ width:'100%', padding:'11px 13px', border:`1.5px solid ${errFields?'#E30613':'#e0e0e0'}`, borderRadius:8, fontSize:15, fontFamily:'inherit', outline:'none', boxSizing:'border-box', background:errFields?'#fff5f5':'#fafafa', color:'#1a1a1a' }}
@@ -257,7 +257,7 @@ export default function IberSilosApp() {
 
   const showToast = (msg, type = "ok") => { setToast({ msg, type }); setTimeout(() => setToast(null), 3000); };
 
-  // â”€â”€ INVOICE CRUD â”€â”€
+  // ── INVOICE CRUD ──
   const saveInvoice = (inv) => {
     const net = parseFloat(inv.netAmount) || 0;
     const rate = IVA_TYPES[inv.ivaType] ?? 0.21;
@@ -273,7 +273,7 @@ export default function IberSilosApp() {
   };
   const deleteInvoice = (id) => { if (!confirm("Eliminare?")) return; persist({ ...data, invoices: data.invoices.filter(i => i.id !== id) }); showToast("Eliminata", "warn"); };
 
-  // â”€â”€ MOVEMENT CRUD â”€â”€
+  // ── MOVEMENT CRUD ──
   const saveMov = (mov) => {
     const final = { ...mov, id: mov.id || `mov-${Date.now()}` };
     const exists = data.movements.find(m => m.id === final.id);
@@ -282,7 +282,7 @@ export default function IberSilosApp() {
   };
   const deleteMov = (id) => { if (!confirm("Eliminare?")) return; persist({ ...data, movements: data.movements.filter(m => m.id !== id) }); showToast("Eliminato", "warn"); };
 
-  // â”€â”€ IBKR CRUD â”€â”€
+  // ── IBKR CRUD ──
   const saveIbkr = (pos) => {
     const shares = parseFloat(pos.shares) || 0, price = parseFloat(pos.priceEur) || 0, fees = parseFloat(pos.fees) || 0;
     const final = { ...pos, totalEur: parseFloat((shares * price + fees).toFixed(2)), id: pos.id || `ibkr-${Date.now()}` };
@@ -292,22 +292,22 @@ export default function IberSilosApp() {
   };
   const deleteIbkr = (id) => { if (!confirm("Eliminare?")) return; persist({ ...data, ibkrPositions: (data.ibkrPositions||[]).filter(p => p.id!==id) }); showToast("Eliminato", "warn"); };
 
-  // â”€â”€ ASIENTO CRUD â”€â”€
+  // ── ASIENTO CRUD ──
   const saveAsiento = (asiento) => {
     const lineas = asiento.lineas.filter(l => l.cuenta && (parseFloat(l.debe)||parseFloat(l.haber)));
     const totalDebe = lineas.reduce((s,l) => s+(parseFloat(l.debe)||0), 0);
     const totalHaber = lineas.reduce((s,l) => s+(parseFloat(l.haber)||0), 0);
-    if (Math.abs(totalDebe - totalHaber) > 0.01) { showToast(`âŒ No cuadra: D ${fmt(totalDebe)} â‰  H ${fmt(totalHaber)}`, "err"); return; }
+    if (Math.abs(totalDebe - totalHaber) > 0.01) { showToast(` No cuadra: D ${fmt(totalDebe)} ≠ H ${fmt(totalHaber)}`, "err"); return; }
     const asientos = data.asientos || [];
     const numero = asiento.numero || String(asientos.length + 1).padStart(4, "0");
     const final = { ...asiento, lineas, numero, id: asiento.id || `asi-${Date.now()}` };
     const exists = asientos.find(a => a.id === final.id);
     persist({ ...data, asientos: exists ? asientos.map(a => a.id===final.id?final:a) : [...asientos, final] });
-    setAsientoModal(null); showToast(`Asiento ${numero} registrado âœ“`);
+    setAsientoModal(null); showToast(`Asiento ${numero} registrado `);
   };
   const deleteAsiento = (id) => { if (!confirm("Eliminar?")) return; persist({ ...data, asientos: (data.asientos||[]).filter(a => a.id!==id) }); showToast("Eliminado", "warn"); };
 
-  // â”€â”€ RECONCILE â”€â”€
+  // ── RECONCILE ──
   const runAutoReconcile = () => {
     const movements = autoReconcile(data.movements, data.invoices);
     const matched = movements.filter(m => m._autoMatch).length;
@@ -321,7 +321,7 @@ export default function IberSilosApp() {
     persist({ ...data, movements, invoices }); setReconcileModal(null); showToast("Riconciliazione salvata");
   };
 
-  // â”€â”€ CSV IMPORT â”€â”€
+  // ── CSV IMPORT ──
   const importCSV = (e) => {
     const file = e.target.files[0]; if (!file) return;
     const reader = new FileReader();
@@ -336,7 +336,7 @@ export default function IberSilosApp() {
     reader.readAsText(file); e.target.value = "";
   };
 
-  // â”€â”€ EXPORT / IMPORT JSON â”€â”€
+  // ── EXPORT / IMPORT JSON ──
   const exportJSON = () => {
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
     const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = `iber-silos-${today()}.json`; a.click();
@@ -357,7 +357,7 @@ export default function IberSilosApp() {
     showToast("Libro Diario esportato");
   };
 
-  // â”€â”€ DERIVED METRICS â”€â”€
+  // ── DERIVED METRICS ──
   const metrics = (() => {
     const inv = data.invoices, mov = data.movements;
     const emesse = inv.filter(i=>i.type==="emessa"), ricevute = inv.filter(i=>i.type==="ricevuta");
@@ -383,13 +383,13 @@ export default function IberSilosApp() {
   );
 
   const TABS = [
-    ["dashboard","ðŸ“Š","Dashboard"],
-    ["fatture","ðŸ§¾","Fatture"],
-    ["movimenti","ðŸ¦","Movimenti"],
-    ["riconciliazione","ðŸ”—","Riconcilia"],
-    ["forecast","ðŸ“ˆ","Forecast"],
-    ["ibkr","ðŸ“¦","IBKR SL"],
-    ["contabilidad","ðŸ“’","Contabilidad"],
+    ["dashboard","","Dashboard"],
+    ["fatture","","Fatture"],
+    ["movimenti","","Movimenti"],
+    ["riconciliazione","","Riconcilia"],
+    ["forecast","","Forecast"],
+    ["ibkr","","IBKR SL"],
+    ["contabilidad","","Contabilidad"],
   ];
 
   return (
@@ -444,7 +444,7 @@ export default function IberSilosApp() {
         .progress-fill { height: 100%; border-radius: 4px; background: linear-gradient(90deg, #E30613, #F5C800); }
       `}</style>
 
-      {/* â”€â”€ HEADER â”€â”€ */}
+      {/* ── HEADER ── */}
       <header style={{ background:"white", borderTop:"4px solid #F5C800", borderBottom:"4px solid #E30613", padding:"0 20px", height:60, display:"flex", alignItems:"center", gap:16, flexShrink:0, boxShadow:"0 2px 10px rgba(0,0,0,0.07)", zIndex:50 }}>
         <IbersilosLogo height={40} />
         <div style={{ width:1, height:28, background:"#E0E0E0" }} />
@@ -452,20 +452,20 @@ export default function IberSilosApp() {
         <div style={{ flex:1 }} />
         <div style={{ display:"flex", gap:14, alignItems:"center" }}>
           <KpiPill label="Fatturato" value={fmt(metrics.fatturato)} color="#E30613" />
-          <KpiPill label="LiquiditÃ " value={fmt(metrics.liquidita)} color={metrics.liquidita>=0?"#28a745":"#E30613"} />
+          <KpiPill label="Liquidità" value={fmt(metrics.liquidita)} color={metrics.liquidita>=0?"#28a745":"#E30613"} />
           <KpiPill label="Crediti" value={fmt(metrics.creditiAperti)} color="#b8860b" />
         </div>
         <div style={{ display:"flex", gap:6 }}>
-          <button className="btn-ghost" onClick={exportJSON} style={{ fontSize:11 }}>â†“ Backup</button>
-          <button className="btn-ghost" onClick={() => fileRef.current.click()} style={{ fontSize:11 }}>â†‘ Importa</button>
+          <button className="btn-ghost" onClick={exportJSON} style={{ fontSize:11 }}>↓ Backup</button>
+          <button className="btn-ghost" onClick={() => fileRef.current.click()} style={{ fontSize:11 }}>↑ Importa</button>
           <input ref={fileRef} type="file" accept=".json" onChange={importJSON} style={{ display:"none" }} />
         </div>
       </header>
 
-      {/* â”€â”€ BODY â”€â”€ */}
+      {/* ── BODY ── */}
       <div style={{ display:"flex", flex:1, overflow:"hidden" }}>
 
-        {/* â”€â”€ SIDEBAR NAV â”€â”€ */}
+        {/* ── SIDEBAR NAV ── */}
         <aside style={{ width:200, background:"white", borderRight:"1px solid #E0E0E0", display:"flex", flexDirection:"column", flexShrink:0, overflowY:"auto" }}>
           <div style={{ padding:"10px 0", borderBottom:"1px solid #F5F5F5" }}>
             <div style={{ fontSize:9, fontWeight:700, letterSpacing:"2px", textTransform:"uppercase", color:"#bbb", padding:"4px 16px 8px" }}>Navigazione</div>
@@ -478,7 +478,7 @@ export default function IberSilosApp() {
           </div>
         </aside>
 
-        {/* â”€â”€ CONTENT â”€â”€ */}
+        {/* ── CONTENT ── */}
         <div style={{ flex:1, overflowY:"auto", padding:24 }}>
 
           {/* DASHBOARD */}
@@ -491,16 +491,16 @@ export default function IberSilosApp() {
                 <div className="kpi-card green"><div className="kpi-label">Margine lordo</div><div className="kpi-value" style={{ color:metrics.margine>=0?"#28a745":"#E30613" }}>{fmt(metrics.margine)} <span style={{ fontSize:14, color:"#999" }}>{metrics.marginePerc.toFixed(1)}%</span></div></div>
                 <div className="kpi-card yellow"><div className="kpi-label">Crediti aperti</div><div className="kpi-value" style={{ color:"#b8860b" }}>{fmt(metrics.creditiAperti)}</div></div>
                 <div className="kpi-card gray"><div className="kpi-label">Debiti aperti</div><div className="kpi-value" style={{ color:"#666" }}>{fmt(metrics.debitiAperti)}</div></div>
-                <div className="kpi-card blue"><div className="kpi-label">LiquiditÃ  stimata</div><div className="kpi-value" style={{ color:metrics.liquidita>=0?"#3949ab":"#E30613" }}>{fmt(metrics.liquidita)}</div></div>
+                <div className="kpi-card blue"><div className="kpi-label">Liquidità stimata</div><div className="kpi-value" style={{ color:metrics.liquidita>=0?"#3949ab":"#E30613" }}>{fmt(metrics.liquidita)}</div></div>
               </div>
               <div className="card" style={{ marginBottom:16 }}>
-                <div style={{ fontSize:10, fontWeight:700, letterSpacing:"1.5px", textTransform:"uppercase", color:"#bbb", marginBottom:12 }}>Forecast liquiditÃ  90 giorni</div>
+                <div style={{ fontSize:10, fontWeight:700, letterSpacing:"1.5px", textTransform:"uppercase", color:"#bbb", marginBottom:12 }}>Forecast liquidità 90 giorni</div>
                 <ResponsiveContainer width="100%" height={180}>
                   <LineChart data={forecast}>
                     <CartesianGrid strokeDasharray="3 3" stroke="#F5F5F5" />
                     <XAxis dataKey="day" tick={{ fontSize:10, fill:"#bbb" }} interval={4} />
                     <YAxis tick={{ fontSize:10, fill:"#bbb" }} tickFormatter={v=>`${(v/1000).toFixed(0)}k`} />
-                    <Tooltip contentStyle={{ background:"white", border:"1.5px solid #E0E0E0", borderRadius:8, fontSize:12 }} formatter={(v)=>[fmt(v),"LiquiditÃ "]} />
+                    <Tooltip contentStyle={{ background:"white", border:"1.5px solid #E0E0E0", borderRadius:8, fontSize:12 }} formatter={(v)=>[fmt(v),"Liquidità"]} />
                     <ReferenceLine y={0} stroke="rgba(227,6,19,0.3)" strokeDasharray="4 4" />
                     <ReferenceLine y={30000} stroke="rgba(40,167,69,0.3)" strokeDasharray="4 4" />
                     <Line type="monotone" dataKey="balance" stroke="#E30613" strokeWidth={2.5} dot={false} />
@@ -510,10 +510,10 @@ export default function IberSilosApp() {
               <div className="card">
                 <div style={{ fontSize:10, fontWeight:700, letterSpacing:"1.5px", textTransform:"uppercase", color:"#bbb", marginBottom:12 }}>Ultime fatture</div>
                 {data.invoices.length===0 ? <div style={{ color:"#bbb", fontSize:13 }}>Nessuna fattura ancora.</div> :
-                  <table><thead><tr><th>NÂ°</th><th>Data</th><th>Tipo</th><th>Controparte</th><th>Imponibile</th><th>Stato</th></tr></thead>
+                  <table><thead><tr><th>N°</th><th>Data</th><th>Tipo</th><th>Controparte</th><th>Imponibile</th><th>Stato</th></tr></thead>
                   <tbody>{data.invoices.slice(-8).reverse().map(inv=>(
                     <tr key={inv.id}>
-                      <td style={{ fontWeight:700, color:"#E30613" }}>{inv.number||"â€”"}</td>
+                      <td style={{ fontWeight:700, color:"#E30613" }}>{inv.number||"—"}</td>
                       <td>{fmtDate(inv.date)}</td>
                       <td><span className={`badge ${inv.type==="emessa"?"badge-green":"badge-yellow"}`}>{inv.type}</span></td>
                       <td>{inv.type==="emessa"?inv.client:inv.supplier}</td>
@@ -546,7 +546,7 @@ export default function IberSilosApp() {
               <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:16 }}>
                 <div className="section-title">Movimenti Bancari</div>
                 <div style={{ display:"flex", gap:8 }}>
-                  <button className="btn-ghost" onClick={() => csvRef.current.click()} style={{ fontSize:11 }}>â†‘ Import CSV Revolut</button>
+                  <button className="btn-ghost" onClick={() => csvRef.current.click()} style={{ fontSize:11 }}>↑ Import CSV Revolut</button>
                   <input ref={csvRef} type="file" accept=".csv" onChange={importCSV} style={{ display:"none" }} />
                   <button className="btn-red" onClick={() => setMovModal({ id:null,date:today(),description:"",amount:"",type:"entrata",account:"Revolut Business",invoiceId:null,reconciled:false,notes:"" })}>+ Movimento</button>
                 </div>
@@ -560,7 +560,7 @@ export default function IberSilosApp() {
             <div>
               <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:20 }}>
                 <div className="section-title">Riconciliazione</div>
-                <button className="btn-red" onClick={runAutoReconcile}>âš¡ Auto-riconcilia</button>
+                <button className="btn-red" onClick={runAutoReconcile}> Auto-riconcilia</button>
               </div>
               <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:14, marginBottom:20 }}>
                 <div className="kpi-card green"><div className="kpi-label">Fatture riconciliate</div><div className="kpi-value">{data.invoices.filter(i=>i.status==="riconciliata").length}<span style={{ fontSize:14,color:"#bbb",marginLeft:6 }}>/ {data.invoices.length}</span></div></div>
@@ -568,7 +568,7 @@ export default function IberSilosApp() {
               </div>
               <div className="card">
                 <div style={{ fontSize:10,fontWeight:700,letterSpacing:"1.5px",textTransform:"uppercase",color:"#bbb",marginBottom:12 }}>Movimenti da abbinare</div>
-                {data.movements.filter(m=>!m.reconciled).length===0 ? <div style={{ color:"#bbb",fontSize:13 }}>Tutti i movimenti sono abbinati âœ“</div> :
+                {data.movements.filter(m=>!m.reconciled).length===0 ? <div style={{ color:"#bbb",fontSize:13 }}>Tutti i movimenti sono abbinati </div> :
                   <table><thead><tr><th>Data</th><th>Descrizione</th><th>Importo</th><th>Tipo</th><th></th></tr></thead>
                   <tbody>{data.movements.filter(m=>!m.reconciled).map(m=>(
                     <tr key={m.id}>
@@ -587,9 +587,9 @@ export default function IberSilosApp() {
           {/* FORECAST */}
           {tab==="forecast" && (
             <div>
-              <div className="section-title" style={{ marginBottom:20 }}>Forecast Cash Flow â€” 90 giorni</div>
+              <div className="section-title" style={{ marginBottom:20 }}>Forecast Cash Flow — 90 giorni</div>
               <div style={{ display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:14, marginBottom:20 }}>
-                <div className="kpi-card blue"><div className="kpi-label">LiquiditÃ  attuale</div><div className="kpi-value" style={{ color:"#3949ab" }}>{fmt(metrics.liquidita)}</div></div>
+                <div className="kpi-card blue"><div className="kpi-label">Liquidità attuale</div><div className="kpi-value" style={{ color:"#3949ab" }}>{fmt(metrics.liquidita)}</div></div>
                 <div className="kpi-card green"><div className="kpi-label">Entrate attese 90gg</div><div className="kpi-value" style={{ color:"#28a745" }}>{fmt(data.invoices.filter(i=>i.type==="emessa"&&i.status==="aperta").reduce((s,i)=>s+(parseFloat(i.grossAmount)||0),0))}</div></div>
                 <div className="kpi-card"><div className="kpi-label">Uscite attese 90gg</div><div className="kpi-value" style={{ color:"#E30613" }}>{fmt(data.invoices.filter(i=>i.type==="ricevuta"&&i.status==="aperta").reduce((s,i)=>s+(parseFloat(i.grossAmount)||0),0))}</div></div>
               </div>
@@ -599,10 +599,10 @@ export default function IberSilosApp() {
                   <LineChart data={forecast}>
                     <CartesianGrid strokeDasharray="3 3" stroke="#F5F5F5" />
                     <XAxis dataKey="day" tick={{ fontSize:10,fill:"#bbb" }} interval={5} />
-                    <YAxis tick={{ fontSize:10,fill:"#bbb" }} tickFormatter={v=>`${(v/1000).toFixed(0)}kâ‚¬`} />
+                    <YAxis tick={{ fontSize:10,fill:"#bbb" }} tickFormatter={v=>`${(v/1000).toFixed(0)}k€`} />
                     <Tooltip contentStyle={{ background:"white",border:"1.5px solid #E0E0E0",borderRadius:8,fontSize:12 }} formatter={(v)=>[fmt(v),"Saldo"]} />
-                    <ReferenceLine y={0} stroke="rgba(227,6,19,0.4)" strokeDasharray="4 4" label={{ value:"â‚¬ 0",fill:"#E30613",fontSize:10 }} />
-                    <ReferenceLine y={30000} stroke="rgba(40,167,69,0.4)" strokeDasharray="4 4" label={{ value:"Riserva â‚¬30K",fill:"#28a745",fontSize:10 }} />
+                    <ReferenceLine y={0} stroke="rgba(227,6,19,0.4)" strokeDasharray="4 4" label={{ value:"€ 0",fill:"#E30613",fontSize:10 }} />
+                    <ReferenceLine y={30000} stroke="rgba(40,167,69,0.4)" strokeDasharray="4 4" label={{ value:"Riserva €30K",fill:"#28a745",fontSize:10 }} />
                     <Line type="monotone" dataKey="balance" stroke="#E30613" strokeWidth={2.5} dot={false} activeDot={{ r:5,fill:"#E30613" }} />
                   </LineChart>
                 </ResponsiveContainer>
@@ -628,14 +628,14 @@ export default function IberSilosApp() {
             return (
               <div>
                 <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20 }}>
-                  <div className="section-title">IBKR SL â€” Portfolio Iber-Silos SLU</div>
+                  <div className="section-title">IBKR SL — Portfolio Iber-Silos SLU</div>
                   <button className="btn-red" onClick={()=>setIbkrModal({ id:null,ticker:"VWCE",date:today(),type:"acquisto",shares:"",priceEur:"",totalEur:"",fees:"0",notes:"" })}>+ Operazione</button>
                 </div>
                 <div style={{ display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:14,marginBottom:20 }}>
                   <div className="kpi-card"><div className="kpi-label">Totale investito</div><div className="kpi-value" style={{ color:"#E30613" }}>{fmt(totalInvested)}</div></div>
                   <div className="kpi-card gray"><div className="kpi-label">Ticker</div><div className="kpi-value">{tickers.length}</div></div>
                   <div className="kpi-card gray"><div className="kpi-label">Operazioni</div><div className="kpi-value">{positions.length}</div></div>
-                  <div className="kpi-card yellow"><div className="kpi-label">PAC target/mese</div><div className="kpi-value" style={{ color:"#b8860b" }}>{fmt(getPacAmount(today()))}</div><div style={{ fontSize:10,color:"#bbb",marginTop:2 }}>â†’ â‚¬500 da lug 2026</div></div>
+                  <div className="kpi-card yellow"><div className="kpi-label">PAC target/mese</div><div className="kpi-value" style={{ color:"#b8860b" }}>{fmt(getPacAmount(today()))}</div><div style={{ fontSize:10,color:"#bbb",marginTop:2 }}>→ €500 da lug 2026</div></div>
                 </div>
                 <div className="card" style={{ marginBottom:16 }}>
                   <div style={{ fontSize:10,fontWeight:700,letterSpacing:"1.5px",textTransform:"uppercase",color:"#bbb",marginBottom:12 }}>Posizioni aperte</div>
@@ -663,12 +663,12 @@ export default function IberSilosApp() {
                 </div>
                 {pacChart.length>0 && (
                   <div className="card" style={{ marginBottom:16 }}>
-                    <div style={{ fontSize:10,fontWeight:700,letterSpacing:"1.5px",textTransform:"uppercase",color:"#bbb",marginBottom:12 }}>PAC mensile â€” investito vs target</div>
+                    <div style={{ fontSize:10,fontWeight:700,letterSpacing:"1.5px",textTransform:"uppercase",color:"#bbb",marginBottom:12 }}>PAC mensile — investito vs target</div>
                     <ResponsiveContainer width="100%" height={180}>
                       <BarChart data={pacChart}>
                         <CartesianGrid strokeDasharray="3 3" stroke="#F5F5F5" />
                         <XAxis dataKey="month" tick={{ fontSize:10,fill:"#bbb" }} />
-                        <YAxis tick={{ fontSize:10,fill:"#bbb" }} tickFormatter={v=>`${v}â‚¬`} />
+                        <YAxis tick={{ fontSize:10,fill:"#bbb" }} tickFormatter={v=>`${v}€`} />
                         <Tooltip contentStyle={{ background:"white",border:"1.5px solid #E0E0E0",borderRadius:8,fontSize:12 }} formatter={(v,n)=>[fmt(v),n==="investito"?"Investito":"Target"]} />
                         <Bar dataKey="investito" fill="#E30613" radius={[4,4,0,0]} />
                         <Bar dataKey="target" fill="#F5F5F5" radius={[4,4,0,0]} />
@@ -690,8 +690,8 @@ export default function IberSilosApp() {
                         <td style={{ textAlign:"right",color:"#999",fontSize:11 }}>{fmt(p.fees)}</td>
                         <td style={{ textAlign:"right",fontWeight:600 }}>{fmt(p.totalEur)}</td>
                         <td>
-                          <button className="btn-ghost" style={{ fontSize:11,padding:"4px 8px",marginRight:4 }} onClick={()=>setIbkrModal(p)}>âœ</button>
-                          <button className="btn-danger" onClick={()=>deleteIbkr(p.id)}>âœ•</button>
+                          <button className="btn-ghost" style={{ fontSize:11,padding:"4px 8px",marginRight:4 }} onClick={()=>setIbkrModal(p)}></button>
+                          <button className="btn-danger" onClick={()=>deleteIbkr(p.id)}></button>
                         </td>
                       </tr>
                     ))}</tbody></table>
@@ -728,14 +728,14 @@ export default function IberSilosApp() {
             return (
               <div>
                 <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20 }}>
-                  <div className="section-title">Contabilidad PGC â€” Iber-Silos SLU</div>
+                  <div className="section-title">Contabilidad PGC — Iber-Silos SLU</div>
                   <div style={{ display:"flex",gap:8 }}>
-                    <button className="btn-ghost" style={{ fontSize:11 }} onClick={exportContabCSV}>â†“ Libro Diario CSV</button>
+                    <button className="btn-ghost" style={{ fontSize:11 }} onClick={exportContabCSV}>↓ Libro Diario CSV</button>
                     <button className="btn-red" onClick={()=>setAsientoModal({ id:null,fecha:today(),numero:String((asientos.length+1)).padStart(4,"0"),concepto:"",lineas:[{cuenta:"",debe:"",haber:"",descripcion:""},{cuenta:"",debe:"",haber:"",descripcion:""}],notas:"" })}>+ Asiento</button>
                   </div>
                 </div>
                 <div style={{ display:"flex",gap:6,marginBottom:20 }}>
-                  {[["diario","Libro Diario"],["mayor","Libro Mayor"],["comprobacion","Bal. ComprobaciÃ³n"],["amortizacion","Ammortamenti"]].map(([v,l])=>(
+                  {[["diario","Libro Diario"],["mayor","Libro Mayor"],["comprobacion","Bal. Comprobación"],["amortizacion","Ammortamenti"]].map(([v,l])=>(
                     <button key={v} className={`tab-btn ${contabView===v?"active":""}`} style={{ fontSize:11,padding:"6px 14px" }} onClick={()=>setContabView(v)}>{l}</button>
                   ))}
                 </div>
@@ -744,12 +744,12 @@ export default function IberSilosApp() {
                   <div className="card">
                     <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12 }}>
                       <span style={{ fontSize:10,fontWeight:700,letterSpacing:"1.5px",textTransform:"uppercase",color:"#bbb" }}>{asientos.length} asientos</span>
-                      {asientos.length>0 && <span className={`badge ${cuadra?"badge-green":"badge-red"}`}>{cuadra?"âœ“ Cuadra":"âœ— No cuadra"}</span>}
+                      {asientos.length>0 && <span className={`badge ${cuadra?"badge-green":"badge-red"}`}>{cuadra?" Cuadra":" No cuadra"}</span>}
                     </div>
-                    {asientos.length===0 ? <div style={{ color:"#bbb",fontSize:13 }}>Nessun asiento. Ogni asiento deve bilanciare: âˆ‘Debe = âˆ‘Haber</div> :
+                    {asientos.length===0 ? <div style={{ color:"#bbb",fontSize:13 }}>Nessun asiento. Ogni asiento deve bilanciare: ∑Debe = ∑Haber</div> :
                       <div style={{ overflowX:"auto" }}>
                         <table>
-                          <thead><tr><th>NÂ°</th><th>Fecha</th><th>Concepto</th><th>Cuenta</th><th>Nombre</th><th style={{ textAlign:"right" }}>Debe</th><th style={{ textAlign:"right" }}>Haber</th><th></th></tr></thead>
+                          <thead><tr><th>N°</th><th>Fecha</th><th>Concepto</th><th>Cuenta</th><th>Nombre</th><th style={{ textAlign:"right" }}>Debe</th><th style={{ textAlign:"right" }}>Haber</th><th></th></tr></thead>
                           <tbody>{[...asientos].reverse().map(asi => {
                             const tD=asi.lineas.reduce((s,l)=>s+(parseFloat(l.debe)||0),0);
                             const tH=asi.lineas.reduce((s,l)=>s+(parseFloat(l.haber)||0),0);
@@ -760,13 +760,13 @@ export default function IberSilosApp() {
                                 {li===0 && <td rowSpan={asi.lineas.length} style={{ verticalAlign:"top",whiteSpace:"nowrap",paddingTop:12,color:"#999" }}>{fmtDate(asi.fecha)}</td>}
                                 {li===0 && <td rowSpan={asi.lineas.length} style={{ verticalAlign:"top",paddingTop:12,maxWidth:160,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",fontWeight:600 }}>{asi.concepto}</td>}
                                 <td style={{ fontWeight:700,fontSize:13,color:l.debe?"#3949ab":"#b8860b" }}>{l.cuenta}</td>
-                                <td style={{ fontSize:11,color:"#999",maxWidth:180,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap" }}>{ACC_MAP[l.cuenta]?.name||l.descripcion||"â€”"}</td>
+                                <td style={{ fontSize:11,color:"#999",maxWidth:180,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap" }}>{ACC_MAP[l.cuenta]?.name||l.descripcion||"—"}</td>
                                 <td style={{ textAlign:"right",color:l.debe?"#28a745":"#F5F5F5",fontWeight:l.debe?600:400 }}>{l.debe?fmt(l.debe):""}</td>
                                 <td style={{ textAlign:"right",color:l.haber?"#E30613":"#F5F5F5",fontWeight:l.haber?600:400 }}>{l.haber?fmt(l.haber):""}</td>
                                 {li===0 && <td rowSpan={asi.lineas.length} style={{ verticalAlign:"top",paddingTop:10,whiteSpace:"nowrap" }}>
                                   {!ok && <span className="badge badge-red" style={{ marginRight:4 }}>!</span>}
-                                  <button className="btn-ghost" style={{ fontSize:11,padding:"4px 8px",marginRight:4 }} onClick={()=>setAsientoModal(asi)}>âœ</button>
-                                  <button className="btn-danger" onClick={()=>deleteAsiento(asi.id)}>âœ•</button>
+                                  <button className="btn-ghost" style={{ fontSize:11,padding:"4px 8px",marginRight:4 }} onClick={()=>setAsientoModal(asi)}></button>
+                                  <button className="btn-danger" onClick={()=>deleteAsiento(asi.id)}></button>
                                 </td>}
                               </tr>
                             ));
@@ -781,12 +781,12 @@ export default function IberSilosApp() {
                   <div>
                     <div style={{ marginBottom:16 }}>
                       <select value={mayorCuenta} onChange={e=>setMayorCuenta(e.target.value)} style={{ maxWidth:400 }}>
-                        {PGC_ACCOUNTS.map(a=><option key={a.code} value={a.code}>{a.code} â€” {a.name}</option>)}
+                        {PGC_ACCOUNTS.map(a=><option key={a.code} value={a.code}>{a.code} — {a.name}</option>)}
                       </select>
                     </div>
                     <div className="card">
                       <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16 }}>
-                        <div><div style={{ fontWeight:800,fontSize:15 }}>{mayorCuenta} â€” {ACC_MAP[mayorCuenta]?.name}</div><div style={{ fontSize:11,color:"#999",marginTop:3 }}>Tipo: {ACC_MAP[mayorCuenta]?.tipo} Â· Grupo {ACC_MAP[mayorCuenta]?.group}</div></div>
+                        <div><div style={{ fontWeight:800,fontSize:15 }}>{mayorCuenta} — {ACC_MAP[mayorCuenta]?.name}</div><div style={{ fontSize:11,color:"#999",marginTop:3 }}>Tipo: {ACC_MAP[mayorCuenta]?.tipo} · Grupo {ACC_MAP[mayorCuenta]?.group}</div></div>
                         <div style={{ textAlign:"right" }}>
                           <div style={{ fontSize:10,color:"#bbb",fontWeight:700,textTransform:"uppercase",letterSpacing:"0.5px" }}>Saldo</div>
                           <div style={{ fontWeight:800,fontSize:20,color:mayorData.debe>=mayorData.haber?"#3949ab":"#E30613" }}>{fmt(Math.abs(mayorData.debe-mayorData.haber))} <span style={{ fontSize:11,color:"#bbb" }}>{mayorData.debe>=mayorData.haber?"D":"H"}</span></div>
@@ -794,7 +794,7 @@ export default function IberSilosApp() {
                       </div>
                       {mayorData.movs.length===0 ? <div style={{ color:"#bbb",fontSize:13 }}>Nessun movimento.</div> :
                         <table>
-                          <thead><tr><th>NÂ°</th><th>Fecha</th><th>Concepto</th><th style={{ textAlign:"right" }}>Debe</th><th style={{ textAlign:"right" }}>Haber</th><th style={{ textAlign:"right" }}>Saldo progr.</th></tr></thead>
+                          <thead><tr><th>N°</th><th>Fecha</th><th>Concepto</th><th style={{ textAlign:"right" }}>Debe</th><th style={{ textAlign:"right" }}>Haber</th><th style={{ textAlign:"right" }}>Saldo progr.</th></tr></thead>
                           <tbody>{mayorData.movs.sort((a,b)=>a.fecha.localeCompare(b.fecha)).map((m,i)=>{
                             saldoProgr+=m.debe-m.haber;
                             return (
@@ -824,7 +824,7 @@ export default function IberSilosApp() {
                   <div className="card">
                     <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16 }}>
                       <div style={{ fontWeight:800,fontSize:15 }}>Balance de Sumas y Saldos</div>
-                      <span className={`badge ${cuadra?"badge-green":"badge-red"}`}>{cuadra?"âœ“ CUADRA":"âœ— NO CUADRA"}</span>
+                      <span className={`badge ${cuadra?"badge-green":"badge-red"}`}>{cuadra?" CUADRA":" NO CUADRA"}</span>
                     </div>
                     {cuentasUsadas.length===0 ? <div style={{ color:"#bbb",fontSize:13 }}>Registra asientos per vedere il balance.</div> :
                       <table>
@@ -857,14 +857,14 @@ export default function IberSilosApp() {
                 {contabView==="amortizacion" && (
                   <div>
                     <div style={{ background:"#fff8e1",border:"1.5px solid #ffe082",borderRadius:8,padding:"10px 14px",marginBottom:16,fontSize:12,color:"#b8860b" }}>
-                      âš ï¸ <strong>Date placeholder</strong> â€” 20/01/2025. Aggiorna con export ContaSimple. Aliquota AEAT maquinaria: <strong>12% lineare</strong> (massimo tabella ufficiale).
+                      ️ <strong>Date placeholder</strong> — 20/01/2025. Aggiorna con export ContaSimple. Aliquota AEAT maquinaria: <strong>12% lineare</strong> (massimo tabella ufficiale).
                     </div>
                     <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:14,marginBottom:20 }}>
                       {amortRows.map(a=>(
                         <div key={a.id} className="kpi-card yellow">
                           <div style={{ display:"flex",justifyContent:"space-between" }}>
-                            <div><div className="kpi-label">{a.name} â€” Conto 224</div></div>
-                            <button className="btn-ghost" style={{ fontSize:10,padding:"3px 8px" }} onClick={()=>{ const nd=prompt("Data acquisto (YYYY-MM-DD):",a.dateAcq); if(nd){ const fa=(data.fixedAssets||DEFAULT_ASSETS).map(x=>x.id===a.id?{...x,dateAcq:nd}:x); persist({...data,fixedAssets:fa}); } }}>âœ data</button>
+                            <div><div className="kpi-label">{a.name} — Conto 224</div></div>
+                            <button className="btn-ghost" style={{ fontSize:10,padding:"3px 8px" }} onClick={()=>{ const nd=prompt("Data acquisto (YYYY-MM-DD):",a.dateAcq); if(nd){ const fa=(data.fixedAssets||DEFAULT_ASSETS).map(x=>x.id===a.id?{...x,dateAcq:nd}:x); persist({...data,fixedAssets:fa}); } }}> data</button>
                           </div>
                           <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginTop:10 }}>
                             <div><div style={{ fontSize:10,color:"#bbb" }}>Costo storico</div><div style={{ fontWeight:700 }}>{fmt(a.costEur)}</div></div>
@@ -890,16 +890,16 @@ export default function IberSilosApp() {
                           const isCurrent = yr===currentYear;
                           return (
                             <tr key={yr} style={{ background:isCurrent?"#FFF5F5":"transparent" }}>
-                              <td style={{ fontWeight:isCurrent?700:400,color:isCurrent?"#E30613":"inherit" }}>{yr}{isCurrent?" â—€":""}</td>
-                              {quotas.map((q,i)=><td key={i} style={{ textAlign:"right",color:q>0?"#1A1A1A":"#bbb" }}>{q>0?fmt(q):"â€”"}</td>)}
-                              <td style={{ textAlign:"right",fontWeight:600,color:"#b8860b" }}>{totQ>0?fmt(totQ):"â€”"}</td>
+                              <td style={{ fontWeight:isCurrent?700:400,color:isCurrent?"#E30613":"inherit" }}>{yr}{isCurrent?" ◀":""}</td>
+                              {quotas.map((q,i)=><td key={i} style={{ textAlign:"right",color:q>0?"#1A1A1A":"#bbb" }}>{q>0?fmt(q):"—"}</td>)}
+                              <td style={{ textAlign:"right",fontWeight:600,color:"#b8860b" }}>{totQ>0?fmt(totQ):"—"}</td>
                               <td style={{ textAlign:"right",color:"#28a745" }}>{fmt(totNet)}</td>
                             </tr>
                           );
                         })}</tbody>
                       </table>
                       <div style={{ marginTop:12,padding:"10px 14px",background:"#F5F5F5",borderRadius:8,fontSize:11,color:"#999" }}>
-                        ðŸ’¡ Asiento annuale: <span style={{ color:"#3949ab",fontWeight:600 }}>681 Ammortamento âˆ‘quota</span> (Debe) â†’ <span style={{ color:"#b8860b",fontWeight:600 }}>281 Amort. acumulada âˆ‘quota</span> (Haber)
+                         Asiento annuale: <span style={{ color:"#3949ab",fontWeight:600 }}>681 Ammortamento ∑quota</span> (Debe) → <span style={{ color:"#b8860b",fontWeight:600 }}>281 Amort. acumulada ∑quota</span> (Haber)
                       </div>
                     </div>
                   </div>
@@ -911,7 +911,7 @@ export default function IberSilosApp() {
         </div>
       </div>
 
-      {/* â”€â”€ MODALS â”€â”€ */}
+      {/* ── MODALS ── */}
       {invoiceModal && <InvoiceModal inv={invoiceModal} onSave={saveInvoice} onClose={()=>setInvoiceModal(null)} />}
       {movModal && <MovModal mov={movModal} onSave={saveMov} onClose={()=>setMovModal(null)} />}
       {ibkrModal && (
@@ -919,7 +919,7 @@ export default function IberSilosApp() {
           <div className="modal" onClick={e=>e.stopPropagation()}>
             <div style={{ display:"flex",justifyContent:"space-between",marginBottom:20 }}>
               <div className="modal-title">{ibkrModal.id?"Modifica operazione":"Nuova operazione"} IBKR SL</div>
-              <button onClick={()=>setIbkrModal(null)} style={{ background:"none",fontSize:20,color:"#999" }}>Ã—</button>
+              <button onClick={()=>setIbkrModal(null)} style={{ background:"none",fontSize:20,color:"#999" }}>×</button>
             </div>
             <IbkrForm pos={ibkrModal} onSave={saveIbkr} onClose={()=>setIbkrModal(null)} />
           </div>
@@ -930,11 +930,11 @@ export default function IberSilosApp() {
           <div className="modal" onClick={e=>e.stopPropagation()}>
             <div style={{ display:"flex",justifyContent:"space-between",marginBottom:18 }}>
               <div className="modal-title">Abbina movimento</div>
-              <button onClick={()=>setReconcileModal(null)} style={{ background:"none",fontSize:20,color:"#999" }}>Ã—</button>
+              <button onClick={()=>setReconcileModal(null)} style={{ background:"none",fontSize:20,color:"#999" }}>×</button>
             </div>
             <div style={{ background:"#FFF5F5",border:"1.5px solid #ef9a9a",borderRadius:8,padding:14,marginBottom:18,fontSize:13 }}>
               <div style={{ fontSize:10,fontWeight:700,letterSpacing:"0.1em",color:"#bbb",marginBottom:6 }}>MOVIMENTO</div>
-              <div style={{ fontWeight:600 }}>{fmtDate(reconcileModal.date)} â€” {reconcileModal.description}</div>
+              <div style={{ fontWeight:600 }}>{fmtDate(reconcileModal.date)} — {reconcileModal.description}</div>
               <div style={{ color:reconcileModal.type==="entrata"?"#28a745":"#E30613",fontWeight:700,marginTop:4 }}>{reconcileModal.type==="entrata"?"+":"-"}{fmt(reconcileModal.amount)}</div>
             </div>
             <div style={{ fontSize:10,fontWeight:700,letterSpacing:"0.1em",textTransform:"uppercase",color:"#bbb",marginBottom:10 }}>Fatture disponibili</div>
@@ -945,10 +945,10 @@ export default function IberSilosApp() {
                   onMouseEnter={e=>e.currentTarget.style.borderColor="#E30613"}
                   onMouseLeave={e=>e.currentTarget.style.borderColor="#E0E0E0"}>
                   <div style={{ display:"flex",justifyContent:"space-between" }}>
-                    <span style={{ color:"#E30613",fontSize:13,fontWeight:700 }}>{inv.number} â€” {inv.type==="emessa"?inv.client:inv.supplier}</span>
+                    <span style={{ color:"#E30613",fontSize:13,fontWeight:700 }}>{inv.number} — {inv.type==="emessa"?inv.client:inv.supplier}</span>
                     <span style={{ fontWeight:600 }}>{fmt(inv.grossAmount)}</span>
                   </div>
-                  <div style={{ color:"#bbb",fontSize:11,marginTop:3 }}>Scad. {fmtDate(inv.dueDate)} Â· {inv.description}</div>
+                  <div style={{ color:"#bbb",fontSize:11,marginTop:3 }}>Scad. {fmtDate(inv.dueDate)} · {inv.description}</div>
                 </div>
               ))}
             </div>
@@ -967,7 +967,7 @@ export default function IberSilosApp() {
   );
 }
 
-// â”€â”€ SUB-COMPONENTS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── SUB-COMPONENTS ─────────────────────────────────────────────────────────────
 
 function KpiPill({ label, value, color }) {
   return (
@@ -997,10 +997,10 @@ function InvoiceTable({ invoices, onEdit, onDelete }) {
       {filtered.length===0 ? <div style={{ color:"#bbb",fontSize:13 }}>Nessuna fattura.</div> :
         <div style={{ overflowX:"auto" }}>
           <table>
-            <thead><tr><th>NÂ°</th><th>Data</th><th>Scad.</th><th>Tipo</th><th>Controparte</th><th>Descrizione</th><th style={{ textAlign:"right" }}>Imponibile</th><th>IVA</th><th style={{ textAlign:"right" }}>Lordo</th><th>Stato</th><th></th></tr></thead>
+            <thead><tr><th>N°</th><th>Data</th><th>Scad.</th><th>Tipo</th><th>Controparte</th><th>Descrizione</th><th style={{ textAlign:"right" }}>Imponibile</th><th>IVA</th><th style={{ textAlign:"right" }}>Lordo</th><th>Stato</th><th></th></tr></thead>
             <tbody>{[...filtered].reverse().map(inv=>(
               <tr key={inv.id}>
-                <td style={{ color:"#E30613",fontWeight:700,whiteSpace:"nowrap" }}>{inv.number||"â€”"}</td>
+                <td style={{ color:"#E30613",fontWeight:700,whiteSpace:"nowrap" }}>{inv.number||"—"}</td>
                 <td style={{ whiteSpace:"nowrap",color:"#999" }}>{fmtDate(inv.date)}</td>
                 <td style={{ whiteSpace:"nowrap",color:inv.dueDate<new Date().toISOString().split("T")[0]&&inv.status==="aperta"?"#E30613":"#999" }}>{fmtDate(inv.dueDate)}</td>
                 <td><span className={`badge ${inv.type==="emessa"?"badge-green":"badge-yellow"}`}>{inv.type}</span></td>
@@ -1011,8 +1011,8 @@ function InvoiceTable({ invoices, onEdit, onDelete }) {
                 <td style={{ textAlign:"right",fontWeight:600 }}>{fmt(inv.grossAmount)}</td>
                 <td><StatusBadge status={inv.status}/></td>
                 <td style={{ whiteSpace:"nowrap" }}>
-                  <button className="btn-ghost" style={{ fontSize:11,marginRight:4,padding:"4px 8px" }} onClick={()=>onEdit(inv)}>âœ</button>
-                  <button className="btn-danger" onClick={()=>onDelete(inv.id)}>âœ•</button>
+                  <button className="btn-ghost" style={{ fontSize:11,marginRight:4,padding:"4px 8px" }} onClick={()=>onEdit(inv)}></button>
+                  <button className="btn-danger" onClick={()=>onDelete(inv.id)}></button>
                 </td>
               </tr>
             ))}</tbody>
@@ -1028,7 +1028,7 @@ function MovementTable({ movements, invoices, onEdit, onDelete, onReconcile }) {
   invoices.forEach(i=>{ invMap[i.id]=i; });
   return (
     <div className="card">
-      <span style={{ color:"#bbb",fontSize:11,fontWeight:600,display:"block",marginBottom:12 }}>{movements.length} movimenti Â· {movements.filter(m=>m.reconciled).length} riconciliati</span>
+      <span style={{ color:"#bbb",fontSize:11,fontWeight:600,display:"block",marginBottom:12 }}>{movements.length} movimenti · {movements.filter(m=>m.reconciled).length} riconciliati</span>
       {movements.length===0 ? <div style={{ color:"#bbb",fontSize:13 }}>Nessun movimento. Importa CSV Revolut o aggiungi manualmente.</div> :
         <div style={{ overflowX:"auto" }}>
           <table>
@@ -1041,12 +1041,12 @@ function MovementTable({ movements, invoices, onEdit, onDelete, onReconcile }) {
                   <td style={{ maxWidth:240,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap" }}>{m.description}</td>
                   <td style={{ color:m.type==="entrata"?"#28a745":"#E30613",fontWeight:700,whiteSpace:"nowrap" }}>{m.type==="entrata"?"+":"-"}{fmt(m.amount)}</td>
                   <td style={{ color:"#bbb",fontSize:11 }}>{m.account}</td>
-                  <td style={{ fontSize:11 }}>{linked?<span style={{ color:"#3949ab",fontWeight:600 }}>{linked.number} â€” {linked.type==="emessa"?linked.client:linked.supplier}</span>:<span style={{ color:"#E0E0E0" }}>â€”</span>}</td>
+                  <td style={{ fontSize:11 }}>{linked?<span style={{ color:"#3949ab",fontWeight:600 }}>{linked.number} — {linked.type==="emessa"?linked.client:linked.supplier}</span>:<span style={{ color:"#E0E0E0" }}>—</span>}</td>
                   <td>{m.reconciled?<span className="badge badge-green">abbinato</span>:<span className="badge badge-gray">libero</span>}</td>
                   <td style={{ whiteSpace:"nowrap" }}>
-                    {!m.reconciled && <button className="btn-ghost" style={{ fontSize:11,marginRight:4,padding:"4px 8px" }} onClick={()=>onReconcile(m)}>ðŸ”—</button>}
-                    <button className="btn-ghost" style={{ fontSize:11,marginRight:4,padding:"4px 8px" }} onClick={()=>onEdit(m)}>âœ</button>
-                    <button className="btn-danger" onClick={()=>onDelete(m.id)}>âœ•</button>
+                    {!m.reconciled && <button className="btn-ghost" style={{ fontSize:11,marginRight:4,padding:"4px 8px" }} onClick={()=>onReconcile(m)}></button>}
+                    <button className="btn-ghost" style={{ fontSize:11,marginRight:4,padding:"4px 8px" }} onClick={()=>onEdit(m)}></button>
+                    <button className="btn-danger" onClick={()=>onDelete(m.id)}></button>
                   </td>
                 </tr>
               );
@@ -1075,15 +1075,15 @@ function InvoiceModal({ inv, onSave, onClose }) {
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal" onClick={e=>e.stopPropagation()}>
         <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20 }}>
-          <div className="modal-title">{form.id?"Modifica fattura":"Nuova fattura"} â€” <span style={{ color:form.type==="emessa"?"#28a745":"#b8860b" }}>{form.type}</span></div>
-          <button onClick={onClose} style={{ background:"none",fontSize:20,color:"#999" }}>Ã—</button>
+          <div className="modal-title">{form.id?"Modifica fattura":"Nuova fattura"} — <span style={{ color:form.type==="emessa"?"#28a745":"#b8860b" }}>{form.type}</span></div>
+          <button onClick={onClose} style={{ background:"none",fontSize:20,color:"#999" }}>×</button>
         </div>
         <div className="form-row"><div style={{ display:"flex",gap:8 }}>
           <button className={`tab-btn ${form.type==="emessa"?"active":""}`} onClick={()=>set("type","emessa")} style={{ flex:1 }}>Emessa</button>
           <button className={`tab-btn ${form.type==="ricevuta"?"active":""}`} onClick={()=>set("type","ricevuta")} style={{ flex:1 }}>Ricevuta</button>
         </div></div>
         <div className="form-row form-row-2">
-          <div><label>NÂ° Fattura</label><input value={form.number} onChange={e=>set("number",e.target.value)} placeholder="IBS-5816/2026/SE" /></div>
+          <div><label>N° Fattura</label><input value={form.number} onChange={e=>set("number",e.target.value)} placeholder="IBS-5816/2026/SE" /></div>
           <div><label>Data</label><input type="date" value={form.date} onChange={e=>set("date",e.target.value)} /></div>
         </div>
         <div className="form-row form-row-2">
@@ -1094,14 +1094,14 @@ function InvoiceModal({ inv, onSave, onClose }) {
           ? <div className="form-row"><label>Cliente</label><select value={form.client} onChange={e=>set("client",e.target.value)}><option value="">Seleziona...</option>{CLIENTS.map(c=><option key={c}>{c}</option>)}</select></div>
           : <div className="form-row"><label>Fornitore</label><select value={form.supplier} onChange={e=>set("supplier",e.target.value)}><option value="">Seleziona...</option>{SUPPLIERS.map(s=><option key={s}>{s}</option>)}</select></div>
         }
-        <div className="form-row"><label>Descrizione</label><input value={form.description} onChange={e=>set("description",e.target.value)} placeholder="Servizi di trasporto â€” ordine..." /></div>
+        <div className="form-row"><label>Descrizione</label><input value={form.description} onChange={e=>set("description",e.target.value)} placeholder="Servizi di trasporto — ordine..." /></div>
         <div className="form-row form-row-2">
-          <div><label>Imponibile (â‚¬)</label><input type="number" step="0.01" value={form.netAmount} onChange={e=>set("netAmount",e.target.value)} /></div>
+          <div><label>Imponibile (€)</label><input type="number" step="0.01" value={form.netAmount} onChange={e=>set("netAmount",e.target.value)} /></div>
           <div><label>Tipo IVA</label><select value={form.ivaType} onChange={e=>set("ivaType",e.target.value)}>{Object.keys(IVA_TYPES_KEYS).map(k=><option key={k}>{k}</option>)}</select></div>
         </div>
         <div className="form-row form-row-2">
-          <div><label>IVA (â‚¬)</label><input readOnly value={form.ivaAmount||0} style={{ color:"#bbb" }} /></div>
-          <div><label>Totale lordo (â‚¬)</label><input readOnly value={form.grossAmount||0} style={{ color:"#E30613",fontWeight:700 }} /></div>
+          <div><label>IVA (€)</label><input readOnly value={form.ivaAmount||0} style={{ color:"#bbb" }} /></div>
+          <div><label>Totale lordo (€)</label><input readOnly value={form.grossAmount||0} style={{ color:"#E30613",fontWeight:700 }} /></div>
         </div>
         <div className="form-row"><label>Link Dropbox documento</label><input value={form.dropboxLink} onChange={e=>set("dropboxLink",e.target.value)} placeholder="https://www.dropbox.com/..." /></div>
         <div className="form-row"><label>Note</label><textarea rows={2} value={form.notes} onChange={e=>set("notes",e.target.value)} /></div>
@@ -1122,7 +1122,7 @@ function MovModal({ mov, onSave, onClose }) {
       <div className="modal" onClick={e=>e.stopPropagation()}>
         <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20 }}>
           <div className="modal-title">{form.id?"Modifica movimento":"Nuovo movimento"}</div>
-          <button onClick={onClose} style={{ background:"none",fontSize:20,color:"#999" }}>Ã—</button>
+          <button onClick={onClose} style={{ background:"none",fontSize:20,color:"#999" }}>×</button>
         </div>
         <div className="form-row form-row-2">
           <div><label>Data</label><input type="date" value={form.date} onChange={e=>set("date",e.target.value)} /></div>
@@ -1130,7 +1130,7 @@ function MovModal({ mov, onSave, onClose }) {
         </div>
         <div className="form-row"><label>Descrizione</label><input value={form.description} onChange={e=>set("description",e.target.value)} /></div>
         <div className="form-row form-row-2">
-          <div><label>Importo (â‚¬)</label><input type="number" step="0.01" value={form.amount} onChange={e=>set("amount",e.target.value)} /></div>
+          <div><label>Importo (€)</label><input type="number" step="0.01" value={form.amount} onChange={e=>set("amount",e.target.value)} /></div>
           <div><label>Tipo</label><select value={form.type} onChange={e=>set("type",e.target.value)}><option>entrata</option><option>uscita</option></select></div>
         </div>
         <div className="form-row"><label>Note</label><textarea rows={2} value={form.notes} onChange={e=>set("notes",e.target.value)} /></div>
@@ -1162,14 +1162,14 @@ function IbkrForm({ pos, onSave, onClose }) {
         <div><label>Shares (quote)</label><input type="number" step="0.0001" value={form.shares} onChange={e=>set("shares",e.target.value)} placeholder="es. 3.4567" /></div>
       </div>
       <div className="form-row form-row-2">
-        <div><label>Prezzo per share (â‚¬)</label><input type="number" step="0.01" value={form.priceEur} onChange={e=>set("priceEur",e.target.value)} placeholder="es. 118.45" /></div>
-        <div><label>Commissioni IBKR (â‚¬)</label><input type="number" step="0.01" value={form.fees} onChange={e=>set("fees",e.target.value)} placeholder="es. 1.25" /></div>
+        <div><label>Prezzo per share (€)</label><input type="number" step="0.01" value={form.priceEur} onChange={e=>set("priceEur",e.target.value)} placeholder="es. 118.45" /></div>
+        <div><label>Commissioni IBKR (€)</label><input type="number" step="0.01" value={form.fees} onChange={e=>set("fees",e.target.value)} placeholder="es. 1.25" /></div>
       </div>
-      <div className="form-row"><label>Totale operazione (â‚¬) â€” calcolato</label><input readOnly value={form.totalEur||0} style={{ color:"#E30613",fontWeight:700 }} /></div>
+      <div className="form-row"><label>Totale operazione (€) — calcolato</label><input readOnly value={form.totalEur||0} style={{ color:"#E30613",fontWeight:700 }} /></div>
       <div style={{ background:"#FFF5F5",border:"1.5px solid #ef9a9a",borderRadius:8,padding:"10px 14px",marginBottom:14,fontSize:11,color:"#E30613" }}>
-        ðŸ’¡ PAC target: <span style={{ fontWeight:700 }}>{getPacAmount(form.date)}/mese</span> Â· Classificazione: <span style={{ color:"#666" }}>Inversiones financieras a largo plazo</span>
+         PAC target: <span style={{ fontWeight:700 }}>{getPacAmount(form.date)}/mese</span> · Classificazione: <span style={{ color:"#666" }}>Inversiones financieras a largo plazo</span>
       </div>
-      <div className="form-row"><label>Note</label><textarea rows={2} value={form.notes} onChange={e=>set("notes",e.target.value)} placeholder="Es: PAC aprile 2026 â€” VWCE" /></div>
+      <div className="form-row"><label>Note</label><textarea rows={2} value={form.notes} onChange={e=>set("notes",e.target.value)} placeholder="Es: PAC aprile 2026 — VWCE" /></div>
       <div style={{ display:"flex",gap:8,marginTop:8 }}>
         <button className="btn-red" style={{ flex:1 }} onClick={()=>onSave(form)}>Salva</button>
         <button className="btn-ghost" onClick={onClose}>Annulla</button>
@@ -1195,21 +1195,21 @@ function AsientoModal({ asiento, onSave, onClose }) {
         <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20 }}>
           <div style={{ display:"flex",alignItems:"center",gap:12 }}>
             <div className="modal-title">{form.id?"Modifica asiento":"Nuevo asiento"}</div>
-            <span className={`badge ${cuadra?"badge-green":"badge-red"}`}>{cuadra?"âœ“ Cuadra":`Diff: ${fmt2(Math.abs(totalDebe-totalHaber))}`}</span>
+            <span className={`badge ${cuadra?"badge-green":"badge-red"}`}>{cuadra?" Cuadra":`Diff: ${fmt2(Math.abs(totalDebe-totalHaber))}`}</span>
           </div>
-          <button onClick={onClose} style={{ background:"none",fontSize:20,color:"#999" }}>Ã—</button>
+          <button onClick={onClose} style={{ background:"none",fontSize:20,color:"#999" }}>×</button>
         </div>
         <div className="form-row form-row-2" style={{ marginBottom:14 }}>
-          <div><label>NÂ° Asiento</label><input value={form.numero} onChange={e=>setField("numero",e.target.value)} /></div>
+          <div><label>N° Asiento</label><input value={form.numero} onChange={e=>setField("numero",e.target.value)} /></div>
           <div><label>Fecha</label><input type="date" value={form.fecha} onChange={e=>setField("fecha",e.target.value)} /></div>
         </div>
-        <div className="form-row" style={{ marginBottom:18 }}><label>Concepto</label><input value={form.concepto} onChange={e=>setField("concepto",e.target.value)} placeholder="Es: Compra compresores / NÃ³mina / Factura..." /></div>
+        <div className="form-row" style={{ marginBottom:18 }}><label>Concepto</label><input value={form.concepto} onChange={e=>setField("concepto",e.target.value)} placeholder="Es: Compra compresores / Nómina / Factura..." /></div>
 
         <div style={{ fontSize:10,fontWeight:700,letterSpacing:"0.1em",textTransform:"uppercase",color:"#bbb",marginBottom:8 }}>Partidas</div>
         <div style={{ background:"#FAFAFA",borderRadius:8,padding:12,marginBottom:14 }}>
           <div style={{ display:"grid",gridTemplateColumns:"110px 1fr 90px 90px 24px",gap:8,marginBottom:6 }}>
             <div style={{ fontSize:10,color:"#bbb",fontWeight:700 }}>Cuenta</div>
-            <div style={{ fontSize:10,color:"#bbb",fontWeight:700 }}>DescripciÃ³n</div>
+            <div style={{ fontSize:10,color:"#bbb",fontWeight:700 }}>Descripción</div>
             <div style={{ fontSize:10,color:"#28a745",fontWeight:700,textAlign:"right" }}>Debe</div>
             <div style={{ fontSize:10,color:"#E30613",fontWeight:700,textAlign:"right" }}>Haber</div>
             <div />
@@ -1218,7 +1218,7 @@ function AsientoModal({ asiento, onSave, onClose }) {
             <div key={i} style={{ display:"grid",gridTemplateColumns:"110px 1fr 90px 90px 24px",gap:8,marginBottom:8,alignItems:"center" }}>
               <div>
                 <select value={l.cuenta} onChange={e=>{ setLinea(i,"cuenta",e.target.value); if(!l.descripcion) setLinea(i,"descripcion",ACC_MAP[e.target.value]?.name||""); }} style={{ fontSize:12,padding:"6px 8px" }}>
-                  <option value="">â€”</option>
+                  <option value="">—</option>
                   {PGC_ACCOUNTS.map(a=><option key={a.code} value={a.code}>{a.code}</option>)}
                 </select>
                 {l.cuenta && <div style={{ fontSize:9,color:"#bbb",marginTop:2,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap" }}>{ACC_MAP[l.cuenta]?.name}</div>}
@@ -1226,10 +1226,10 @@ function AsientoModal({ asiento, onSave, onClose }) {
               <input value={l.descripcion} onChange={e=>setLinea(i,"descripcion",e.target.value)} style={{ fontSize:12 }} placeholder="Dettaglio..." />
               <input type="number" step="0.01" value={l.debe} onChange={e=>{ setLinea(i,"debe",e.target.value); if(e.target.value) setLinea(i,"haber",""); }} style={{ fontSize:12,textAlign:"right",borderColor:l.debe?"#a5d6a7":"#E0E0E0" }} placeholder="0.00" />
               <input type="number" step="0.01" value={l.haber} onChange={e=>{ setLinea(i,"haber",e.target.value); if(e.target.value) setLinea(i,"debe",""); }} style={{ fontSize:12,textAlign:"right",borderColor:l.haber?"#ef9a9a":"#E0E0E0" }} placeholder="0.00" />
-              {form.lineas.length>2 ? <button onClick={()=>removeLinea(i)} style={{ background:"transparent",color:"#E30613",border:"none",cursor:"pointer",fontSize:16,padding:0 }}>âœ•</button> : <div />}
+              {form.lineas.length>2 ? <button onClick={()=>removeLinea(i)} style={{ background:"transparent",color:"#E30613",border:"none",cursor:"pointer",fontSize:16,padding:0 }}></button> : <div />}
             </div>
           ))}
-          <button className="btn-ghost" style={{ fontSize:11,marginTop:4,width:"100%" }} onClick={addLinea}>+ AÃ±adir lÃ­nea</button>
+          <button className="btn-ghost" style={{ fontSize:11,marginTop:4,width:"100%" }} onClick={addLinea}>+ Añadir línea</button>
         </div>
 
         <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10,marginBottom:18 }}>
@@ -1243,13 +1243,13 @@ function AsientoModal({ asiento, onSave, onClose }) {
           </div>
           <div style={{ background:cuadra?"#e8f5e9":"#ffebee",border:`1.5px solid ${cuadra?"#a5d6a7":"#ef9a9a"}`,borderRadius:8,padding:"10px 14px",textAlign:"center" }}>
             <div style={{ fontSize:10,color:cuadra?"#28a745":"#E30613",fontWeight:700,letterSpacing:"0.08em" }}>DIFERENCIA</div>
-            <div style={{ fontWeight:800,color:cuadra?"#28a745":"#E30613",fontSize:16 }}>{cuadra?"âœ“":fmt2(Math.abs(totalDebe-totalHaber))}</div>
+            <div style={{ fontWeight:800,color:cuadra?"#28a745":"#E30613",fontSize:16 }}>{cuadra?"":fmt2(Math.abs(totalDebe-totalHaber))}</div>
           </div>
         </div>
 
         <div className="form-row" style={{ marginBottom:16 }}><label>Notas</label><textarea rows={2} value={form.notas} onChange={e=>setField("notas",e.target.value)} placeholder="Riferimento fattura, note..." /></div>
         <div style={{ display:"flex",gap:8 }}>
-          <button className="btn-red" style={{ flex:1, opacity:cuadra?1:0.5 }} onClick={()=>onSave(form)} disabled={!cuadra}>{cuadra?"Registra asiento":"âš  Non cuadra"}</button>
+          <button className="btn-red" style={{ flex:1, opacity:cuadra?1:0.5 }} onClick={()=>onSave(form)} disabled={!cuadra}>{cuadra?"Registra asiento":" Non cuadra"}</button>
           <button className="btn-ghost" onClick={onClose}>Annulla</button>
         </div>
       </div>
