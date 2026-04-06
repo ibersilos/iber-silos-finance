@@ -110,7 +110,10 @@ async function loadData() {
       d.ibkrPositions = toArray(d.ibkrPositions);
       d.asientos = toArray(d.asientos);
       d.fixedAssets = toArray(d.fixedAssets).length ? toArray(d.fixedAssets) : DEFAULT_ASSETS;
+      console.log("Firebase loaded:", d.invoices.length, "invoices,", d.movements.length, "movements");
       return d;
+    } else {
+      console.log("Firebase: no data at", DATA_REF);
     }
   } catch (e) { console.error("Firebase load error:", e); }
   return { invoices: [], movements: [], ibkrPositions: [], asientos: [], fixedAssets: DEFAULT_ASSETS };
@@ -150,7 +153,7 @@ function buildForecast(invoices, movements) {
     const due = new Date(inv.dueDate || addDays(inv.date, 30));
     const diff = Math.ceil((due - baseDate) / 86400000);
     if (diff < -5 || diff > 90) return;
-    events.push({ day: Math.max(0, diff), amount: inv.type === "emitida" ? (parseFloat(inv.grossAmount)||0) : -(parseFloat(inv.grossAmount)||0) });
+    events.push({ day: Math.max(0, diff), amount: inv.type === "emessa" || inv.type === "emitida" ? (parseFloat(inv.grossAmount)||0) : -(parseFloat(inv.grossAmount)||0) });
   });
   const points = [];
   let running = lastBalance;
@@ -386,7 +389,8 @@ export default function IberSilosApp() {
   // ── DERIVED METRICS ──
   const metrics = (() => {
     const inv = data.invoices, mov = data.movements;
-    const emesse = inv.filter(i=>i.type==="emitida"), ricevute = inv.filter(i=>i.type==="recibida");
+    const emesse = inv.filter(i=>i.type==="emessa"||i.type==="emitida");
+    const ricevute = inv.filter(i=>i.type==="ricevuta"||i.type==="recibida");
     const fatturato = emesse.reduce((s,i)=>s+(parseFloat(i.netAmount)||0),0);
     const costi = ricevute.reduce((s,i)=>s+(parseFloat(i.netAmount)||0),0);
     const creditiAperti = emesse.filter(i=>i.status==="aperta").reduce((s,i)=>s+(parseFloat(i.grossAmount)||0),0);
@@ -541,8 +545,8 @@ export default function IberSilosApp() {
                     <tr key={inv.id}>
                       <td style={{ fontWeight:700, color:"#E30613" }}>{inv.number||"—"}</td>
                       <td>{fmtDate(inv.date)}</td>
-                      <td><span className={`badge ${inv.type==="emitida"?"badge-green":"badge-yellow"}`}>{inv.type}</span></td>
-                      <td>{inv.type==="emitida"?inv.client:inv.supplier}</td>
+                      <td><span className={`badge ${(inv.type==="emessa"||inv.type==="emitida")?"badge-green":"badge-yellow"}`}>{inv.type}</span></td>
+                      <td>{(inv.type==="emessa"||inv.type==="emitida")?inv.client:inv.supplier}</td>
                       <td style={{ fontWeight:600 }}>{fmt(inv.netAmount)}</td>
                       <td><StatusBadge status={inv.status}/></td>
                     </tr>
@@ -616,8 +620,8 @@ export default function IberSilosApp() {
               <div className="section-title" style={{ marginBottom:20 }}>Previsión Cash Flow — 90 giorni</div>
               <div style={{ display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:14, marginBottom:20 }}>
                 <div className="kpi-card blue"><div className="kpi-label">Liquidez attuale</div><div className="kpi-value" style={{ color:"#3949ab" }}>{fmt(metrics.liquidita)}</div></div>
-                <div className="kpi-card green"><div className="kpi-label">Cobros previstos 90 días</div><div className="kpi-value" style={{ color:"#28a745" }}>{fmt(data.invoices.filter(i=>i.type==="emitida"&&i.status==="aperta").reduce((s,i)=>s+(parseFloat(i.grossAmount)||0),0))}</div></div>
-                <div className="kpi-card"><div className="kpi-label">Pagos previstos 90 días</div><div className="kpi-value" style={{ color:"#E30613" }}>{fmt(data.invoices.filter(i=>i.type==="recibida"&&i.status==="aperta").reduce((s,i)=>s+(parseFloat(i.grossAmount)||0),0))}</div></div>
+                <div className="kpi-card green"><div className="kpi-label">Cobros previstos 90 días</div><div className="kpi-value" style={{ color:"#28a745" }}>{fmt(data.invoices.filter(i=>(i.type==="emessa"||i.type==="emitida")&&i.status==="aperta").reduce((s,i)=>s+(parseFloat(i.grossAmount)||0),0))}</div></div>
+                <div className="kpi-card"><div className="kpi-label">Pagos previstos 90 días</div><div className="kpi-value" style={{ color:"#E30613" }}>{fmt(data.invoices.filter(i=>(i.type==="ricevuta"||i.type==="recibida")&&i.status==="aperta").reduce((s,i)=>s+(parseFloat(i.grossAmount)||0),0))}</div></div>
               </div>
               <div className="card" style={{ marginBottom:16 }}>
                 <div style={{ fontSize:10,fontWeight:700,letterSpacing:"1.5px",textTransform:"uppercase",color:"#bbb",marginBottom:14 }}>Proyección saldo</div>
@@ -971,7 +975,7 @@ export default function IberSilosApp() {
                   onMouseEnter={e=>e.currentTarget.style.borderColor="#E30613"}
                   onMouseLeave={e=>e.currentTarget.style.borderColor="#E0E0E0"}>
                   <div style={{ display:"flex",justifyContent:"space-between" }}>
-                    <span style={{ color:"#E30613",fontSize:13,fontWeight:700 }}>{inv.number} — {inv.type==="emitida"?inv.client:inv.supplier}</span>
+                    <span style={{ color:"#E30613",fontSize:13,fontWeight:700 }}>{inv.number} — {(inv.type==="emessa"||inv.type==="emitida")?inv.client:inv.supplier}</span>
                     <span style={{ fontWeight:600 }}>{fmt(inv.grossAmount)}</span>
                   </div>
                   <div style={{ color:"#bbb",fontSize:11,marginTop:3 }}>Scad. {fmtDate(inv.dueDate)} · {inv.description}</div>
@@ -1011,7 +1015,7 @@ function StatusBadge({ status }) {
 
 function InvoiceTable({ invoices, onEdit, onDelete }) {
   const [filter, setFilter] = useState("todas");
-  const filtered = filter==="todas" ? invoices : invoices.filter(i=>i.type===filter);
+  const filtered = filter==="todas" ? invoices : invoices.filter(i=>i.type===filter||i.type===(filter==="emitida"?"emessa":filter==="recibida"?"ricevuta":filter));
   return (
     <div className="card">
       <div style={{ display:"flex",gap:6,marginBottom:16,alignItems:"center" }}>
@@ -1029,8 +1033,8 @@ function InvoiceTable({ invoices, onEdit, onDelete }) {
                 <td style={{ color:"#E30613",fontWeight:700,whiteSpace:"nowrap" }}>{inv.number||"—"}</td>
                 <td style={{ whiteSpace:"nowrap",color:"#999" }}>{fmtDate(inv.date)}</td>
                 <td style={{ whiteSpace:"nowrap",color:inv.dueDate<new Date().toISOString().split("T")[0]&&inv.status==="aperta"?"#E30613":"#999" }}>{fmtDate(inv.dueDate)}</td>
-                <td><span className={`badge ${inv.type==="emitida"?"badge-green":"badge-yellow"}`}>{inv.type}</span></td>
-                <td style={{ maxWidth:130,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap" }}>{inv.type==="emitida"?inv.client:inv.supplier}</td>
+                <td><span className={`badge ${(inv.type==="emessa"||inv.type==="emitida")?"badge-green":"badge-yellow"}`}>{inv.type}</span></td>
+                <td style={{ maxWidth:130,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap" }}>{(inv.type==="emessa"||inv.type==="emitida")?inv.client:inv.supplier}</td>
                 <td style={{ maxWidth:160,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",color:"#999",fontSize:12 }}>{inv.description}</td>
                 <td style={{ textAlign:"right",fontWeight:600 }}>{fmt(inv.netAmount)}</td>
                 <td style={{ color:"#bbb",fontSize:11 }}>{inv.ivaType}</td>
@@ -1067,7 +1071,7 @@ function MovementTable({ movements, invoices, onEdit, onDelete, onReconcile }) {
                   <td style={{ maxWidth:240,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap" }}>{m.description}</td>
                   <td style={{ color:m.type==="entrata"?"#28a745":"#E30613",fontWeight:700,whiteSpace:"nowrap" }}>{m.type==="entrata"?"+":"-"}{fmt(m.amount)}</td>
                   <td style={{ color:"#bbb",fontSize:11 }}>{m.account}</td>
-                  <td style={{ fontSize:11 }}>{linked?<span style={{ color:"#3949ab",fontWeight:600 }}>{linked.number} — {linked.type==="emitida"?linked.client:linked.supplier}</span>:<span style={{ color:"#E0E0E0" }}>—</span>}</td>
+                  <td style={{ fontSize:11 }}>{linked?<span style={{ color:"#3949ab",fontWeight:600 }}>{linked.number} — {(linked.type==="emessa"||linked.type==="emitida")?linked.client:linked.supplier}</span>:<span style={{ color:"#E0E0E0" }}>—</span>}</td>
                   <td>{m.reconciled?<span className="badge badge-green">abbinato</span>:<span className="badge badge-gray">libero</span>}</td>
                   <td style={{ whiteSpace:"nowrap" }}>
                     {!m.reconciled && <button className="btn-ghost" style={{ fontSize:11,marginRight:4,padding:"4px 8px" }} onClick={()=>onReconcile(m)}></button>}
@@ -1101,12 +1105,12 @@ function InvoiceModal({ inv, onSave, onClose }) {
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal" onClick={e=>e.stopPropagation()}>
         <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20 }}>
-          <div className="modal-title">{form.id?"Editar factura":"Nueva factura"} — <span style={{ color:form.type==="emitida"?"#28a745":"#b8860b" }}>{form.type}</span></div>
+          <div className="modal-title">{form.id?"Editar factura":"Nueva factura"} — <span style={{ color:(form.type==="emessa"||form.type==="emitida")?"#28a745":"#b8860b" }}>{form.type}</span></div>
           <button onClick={onClose} style={{ background:"none",fontSize:20,color:"#999" }}>×</button>
         </div>
         <div className="form-row"><div style={{ display:"flex",gap:8 }}>
-          <button className={`tab-btn ${form.type==="emitida"?"active":""}`} onClick={()=>set("type","emitida")} style={{ flex:1 }}>Emessa</button>
-          <button className={`tab-btn ${form.type==="recibida"?"active":""}`} onClick={()=>set("type","recibida")} style={{ flex:1 }}>Ricevuta</button>
+          <button className={`tab-btn ${(form.type==="emessa"||form.type==="emitida")?"active":""}`} onClick={()=>set("type","emessa")} style={{ flex:1 }}>Emessa</button>
+          <button className={`tab-btn ${(form.type==="ricevuta"||form.type==="recibida")?"active":""}`} onClick={()=>set("type","ricevuta")} style={{ flex:1 }}>Ricevuta</button>
         </div></div>
         <div className="form-row form-row-2">
           <div><label>N° Factura</label><input value={form.number} onChange={e=>set("number",e.target.value)} placeholder="IBS-5816/2026/SE" /></div>
