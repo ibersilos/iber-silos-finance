@@ -1,10 +1,26 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { LineChart, Line, BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, ReferenceLine } from "recharts";
+import { initializeApp } from "firebase/app";
+import { getDatabase, ref, set, get, onValue } from "firebase/database";
+
+// ── FIREBASE CONFIG ────────────────────────────────────────────────────────────
+const firebaseConfig = {
+  apiKey: "AIzaSyDbLEYKeJw0667KPnMKLnwdALK_UB71XtM",
+  authDomain: "ibersilos-c6053.firebaseapp.com",
+  databaseURL: "https://ibersilos-c6053-default-rtdb.europe-west1.firebasedatabase.app",
+  projectId: "ibersilos-c6053",
+  storageBucket: "ibersilos-c6053.firebasestorage.app",
+  messagingSenderId: "1073852027153",
+  appId: "1:1073852027153:web:4a9421ddbb2b72143bbcb0"
+};
+const firebaseApp = initializeApp(firebaseConfig);
+const db = getDatabase(firebaseApp);
+const DATA_REF = "finance/AC001/data";
 
 // ── CONSTANTS ─────────────────────────────────────────────────────────────────
-const CLIENTS = ["Buzzatti", "Coder SA", "Molino dalla Giovanna", "Presta Silo", "Altro"];
+const CLIENTS = ["Buzzatti", "Coder SA (Svizzera — art.21)", "Molino dalla Giovanna", "Altro"];
 const SUPPLIERS = ["CCI Italia SRLS", "BMB Trasporti", "T-Way (renting)", "La Clau Assessors", "Gestrams", "Alma Bianca 2018 SL", "DKV", "E100", "MTO Logistics", "Truck Service Srl", "Altro"];
-const IVA_TYPES = { "21%": 0.21, "RC (reverse charge)": 0, "Esente": 0, "0%": 0 };
+const IVA_TYPES = { "21%": 0.21, "10%": 0.10, "7%": 0.07, "RC (reverse charge)": 0, "Esente": 0, "0%": 0 };
 const IBKR_ETFS = ["VWCE", "VUAA", "SEC0", "C50", "Altro"];
 const STORAGE_KEY = "iber-silos-v2";
 
@@ -77,22 +93,32 @@ function calcAmortAccumulated(asset, upToYear) {
   return Math.min(total, asset.costEur);
 }
 
-// ── STORAGE ───────────────────────────────────────────────────────────────────
+// ── STORAGE — Firebase Realtime Database ──────────────────────────────────────
+const toArray = (val) => {
+  if (!val) return [];
+  if (Array.isArray(val)) return val;
+  return Object.values(val);
+};
+
 async function loadData() {
   try {
-    const res = localStorage.getItem(STORAGE_KEY);
-    if (res) {
-      const d = JSON.parse(res);
-      if (!d.asientos) d.asientos = [];
-      if (!d.fixedAssets) d.fixedAssets = DEFAULT_ASSETS;
-      if (!d.ibkrPositions) d.ibkrPositions = [];
+    const snapshot = await get(ref(db, DATA_REF));
+    if (snapshot.exists()) {
+      const d = snapshot.val();
+      d.invoices = toArray(d.invoices);
+      d.movements = toArray(d.movements);
+      d.ibkrPositions = toArray(d.ibkrPositions);
+      d.asientos = toArray(d.asientos);
+      d.fixedAssets = toArray(d.fixedAssets).length ? toArray(d.fixedAssets) : DEFAULT_ASSETS;
       return d;
     }
-  } catch {}
+  } catch (e) { console.error("Firebase load error:", e); }
   return { invoices: [], movements: [], ibkrPositions: [], asientos: [], fixedAssets: DEFAULT_ASSETS };
 }
 async function saveData(data) {
-  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(data)); } catch {}
+  try {
+    await set(ref(db, DATA_REF), data);
+  } catch (e) { console.error("Firebase save error:", e); }
 }
 
 // ── RECONCILIATION ────────────────────────────────────────────────────────────
@@ -124,7 +150,7 @@ function buildForecast(invoices, movements) {
     const due = new Date(inv.dueDate || addDays(inv.date, 30));
     const diff = Math.ceil((due - baseDate) / 86400000);
     if (diff < -5 || diff > 90) return;
-    events.push({ day: Math.max(0, diff), amount: inv.type === "emitida" ? (parseFloat(inv.grossAmount)||0) : -(parseFloat(inv.grossAmount)||0) });
+    events.push({ day: Math.max(0, diff), amount: inv.type === "emessa" || inv.type === "emitida" ? (parseFloat(inv.grossAmount)||0) : -(parseFloat(inv.grossAmount)||0) });
   });
   const points = [];
   let running = lastBalance;
@@ -360,7 +386,8 @@ export default function IberSilosApp() {
   // ── DERIVED METRICS ──
   const metrics = (() => {
     const inv = data.invoices, mov = data.movements;
-    const emesse = inv.filter(i=>i.type==="emitida"), ricevute = inv.filter(i=>i.type==="recibida");
+    const emesse = inv.filter(i=>i.type==="emessa"||i.type==="emitida");
+    const ricevute = inv.filter(i=>i.type==="ricevuta"||i.type==="recibida");
     const fatturato = emesse.reduce((s,i)=>s+(parseFloat(i.netAmount)||0),0);
     const costi = ricevute.reduce((s,i)=>s+(parseFloat(i.netAmount)||0),0);
     const creditiAperti = emesse.filter(i=>i.status==="aperta").reduce((s,i)=>s+(parseFloat(i.grossAmount)||0),0);
@@ -515,8 +542,8 @@ export default function IberSilosApp() {
                     <tr key={inv.id}>
                       <td style={{ fontWeight:700, color:"#E30613" }}>{inv.number||"—"}</td>
                       <td>{fmtDate(inv.date)}</td>
-                      <td><span className={`badge ${inv.type==="emitida"?"badge-green":"badge-yellow"}`}>{inv.type}</span></td>
-                      <td>{inv.type==="emitida"?inv.client:inv.supplier}</td>
+                      <td><span className={`badge ${(inv.type==="emessa"||inv.type==="emitida")?"badge-green":"badge-yellow"}`}>{inv.type}</span></td>
+                      <td>{(inv.type==="emessa"||inv.type==="emitida")?inv.client:inv.supplier}</td>
                       <td style={{ fontWeight:600 }}>{fmt(inv.netAmount)}</td>
                       <td><StatusBadge status={inv.status}/></td>
                     </tr>
@@ -590,8 +617,8 @@ export default function IberSilosApp() {
               <div className="section-title" style={{ marginBottom:20 }}>Previsión Cash Flow — 90 giorni</div>
               <div style={{ display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:14, marginBottom:20 }}>
                 <div className="kpi-card blue"><div className="kpi-label">Liquidez attuale</div><div className="kpi-value" style={{ color:"#3949ab" }}>{fmt(metrics.liquidita)}</div></div>
-                <div className="kpi-card green"><div className="kpi-label">Cobros previstos 90 días</div><div className="kpi-value" style={{ color:"#28a745" }}>{fmt(data.invoices.filter(i=>i.type==="emitida"&&i.status==="aperta").reduce((s,i)=>s+(parseFloat(i.grossAmount)||0),0))}</div></div>
-                <div className="kpi-card"><div className="kpi-label">Pagos previstos 90 días</div><div className="kpi-value" style={{ color:"#E30613" }}>{fmt(data.invoices.filter(i=>i.type==="recibida"&&i.status==="aperta").reduce((s,i)=>s+(parseFloat(i.grossAmount)||0),0))}</div></div>
+                <div className="kpi-card green"><div className="kpi-label">Cobros previstos 90 días</div><div className="kpi-value" style={{ color:"#28a745" }}>{fmt(data.invoices.filter(i=>(i.type==="emessa"||i.type==="emitida")&&i.status==="aperta").reduce((s,i)=>s+(parseFloat(i.grossAmount)||0),0))}</div></div>
+                <div className="kpi-card"><div className="kpi-label">Pagos previstos 90 días</div><div className="kpi-value" style={{ color:"#E30613" }}>{fmt(data.invoices.filter(i=>(i.type==="ricevuta"||i.type==="recibida")&&i.status==="aperta").reduce((s,i)=>s+(parseFloat(i.grossAmount)||0),0))}</div></div>
               </div>
               <div className="card" style={{ marginBottom:16 }}>
                 <div style={{ fontSize:10,fontWeight:700,letterSpacing:"1.5px",textTransform:"uppercase",color:"#bbb",marginBottom:14 }}>Proyección saldo</div>
@@ -735,7 +762,7 @@ export default function IberSilosApp() {
                   </div>
                 </div>
                 <div style={{ display:"flex",gap:6,marginBottom:20 }}>
-                  {[["diario","Libro Diario"],["mayor","Libro Mayor"],["comprobacion","Bal. Comprobación"],["amortizacion","Amortizaciones"]].map(([v,l])=>(
+                  {[["diario","Libro Diario"],["mayor","Libro Mayor"],["comprobacion","Bal. Comprobación"],["pyg","PyG"],["bancos","Bancos"],["amortizacion","Amortizaciones"]].map(([v,l])=>(
                     <button key={v} className={`tab-btn ${contabView===v?"active":""}`} style={{ fontSize:11,padding:"6px 14px" }} onClick={()=>setContabView(v)}>{l}</button>
                   ))}
                 </div>
@@ -854,6 +881,180 @@ export default function IberSilosApp() {
                   </div>
                 )}
 
+                {contabView==="pyg" && (() => {
+                  const inv = data.invoices || [];
+                  const mov = data.movements || [];
+                  const amort = (data.fixedAssets||DEFAULT_ASSETS).reduce((s,a) => s + calcAmortYear(a, new Date().getFullYear()), 0);
+
+                  // INGRESOS grupo 7
+                  const ingTransporte = inv.filter(i=>(i.type==="emessa"||i.type==="emitida")&&!["annullata"].includes(i.status)&&!i.number?.startsWith("R-")).reduce((s,i)=>s+(parseFloat(i.netAmount)||0),0);
+                  const ingRettifiche = inv.filter(i=>i.number?.startsWith("R-")).reduce((s,i)=>s+(parseFloat(i.netAmount)||0),0);
+                  const ingNetto = ingTransporte + ingRettifiche;
+
+                  // GASTOS grupo 6 — da movimenti categorizzati
+                  const gastoSubCCI = mov.filter(m=>m.type==="uscita"&&m.description?.includes("C.C.I")).reduce((s,m)=>s+(parseFloat(m.amount)||0),0);
+                  const gastoBMB = mov.filter(m=>m.type==="uscita"&&m.description?.includes("BMB")).reduce((s,m)=>s+(parseFloat(m.amount)||0),0);
+                  const gastoLaClau = mov.filter(m=>m.type==="uscita"&&m.description?.includes("La Clau")).reduce((s,m)=>s+(parseFloat(m.amount)||0),0);
+                  const gastoIBKR = mov.filter(m=>m.type==="uscita"&&m.description?.includes("Interactive Brokers")).reduce((s,m)=>s+(parseFloat(m.amount)||0),0);
+                  const gastoRevolut = mov.filter(m=>m.type==="uscita"&&m.notes?.includes("Comisión mensual")).reduce((s,m)=>s+(parseFloat(m.amount)||0),0);
+                  const gastoAEAT = mov.filter(m=>m.type==="uscita"&&m.description?.includes("AEAT")).reduce((s,m)=>s+(parseFloat(m.amount)||0),0);
+                  const gastoNomina = mov.filter(m=>m.type==="uscita"&&m.notes?.includes("administrador")).reduce((s,m)=>s+(parseFloat(m.amount)||0),0);
+                  const gastoMTO = mov.filter(m=>m.type==="uscita"&&m.description?.includes("MTO")).reduce((s,m)=>s+(parseFloat(m.amount)||0),0);
+                  const gastoCar = mov.filter(m=>m.type==="uscita"&&m.notes?.startsWith("CAR")||m.notes?.startsWith("Gasto")).reduce((s,m)=>s+(parseFloat(m.amount)||0),0);
+                  const gastoOtros = mov.filter(m=>m.type==="uscita"&&m.description?.includes("Truck Service")).reduce((s,m)=>s+(parseFloat(m.amount)||0),0);
+                  const totalGastos = gastoSubCCI + gastoBMB + gastoLaClau + gastoRevolut + gastoAEAT + gastoNomina + gastoMTO + gastoCar + gastoOtros;
+                  const ebitda = ingNetto - totalGastos;
+                  const ebit = ebitda - amort;
+                  const is = ebit > 0 ? ebit * 0.15 : 0;
+                  const beneficioNeto = ebit - is;
+
+                  const Row = ({label, amount, bold, indent, color, separator}) => (
+                    <tr style={{ borderBottom: separator?"2px solid #E0E0E0":"1px solid #F5F5F5" }}>
+                      <td style={{ padding:"8px 12px", fontSize:13, paddingLeft: indent?32:12, fontWeight:bold?700:400, color:color||"#1A1A1A" }}>{label}</td>
+                      <td style={{ padding:"8px 12px", textAlign:"right", fontWeight:bold?700:400, color: amount<0?"#E30613": amount>0&&bold?"#28a745":"#1A1A1A", fontSize:13 }}>{fmt(amount)}</td>
+                    </tr>
+                  );
+
+                  return (
+                    <div>
+                      <div style={{ background:"#fff8e1",border:"1.5px solid #ffe082",borderRadius:8,padding:"10px 14px",marginBottom:16,fontSize:12,color:"#b8860b" }}>
+                        Cuenta de Pérdidas y Ganancias — datos extraídos de movimientos Revolut + facturas. Verificar con La Clau para cierre fiscal oficial.
+                      </div>
+                      <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:14, marginBottom:20 }}>
+                        <div className="kpi-card green"><div className="kpi-label">Ingresos netos</div><div className="kpi-value" style={{ color:"#28a745" }}>{fmt(ingNetto)}</div></div>
+                        <div className="kpi-card yellow"><div className="kpi-label">EBITDA</div><div className="kpi-value" style={{ color: ebitda>=0?"#b8860b":"#E30613" }}>{fmt(ebitda)}</div></div>
+                        <div className="kpi-card"><div className="kpi-label">Resultado neto (IS 15%)</div><div className="kpi-value" style={{ color: beneficioNeto>=0?"#28a745":"#E30613" }}>{fmt(beneficioNeto)}</div></div>
+                      </div>
+                      <div className="card">
+                        <table>
+                          <thead><tr><th>Concepto</th><th style={{ textAlign:"right" }}>Importe</th></tr></thead>
+                          <tbody>
+                            <Row label="INGRESOS DE EXPLOTACIÓN" amount={ingNetto} bold color="#28a745" separator/>
+                            <Row label="Prestaciones de servicios (705/706)" amount={ingTransporte} indent/>
+                            <Row label="Rectificativas (R-)" amount={ingRettifiche} indent/>
+                            <Row label="" amount={0} separator/>
+                            <Row label="GASTOS DE EXPLOTACIÓN" amount={-totalGastos} bold color="#E30613" separator/>
+                            <Row label="Subcontratistas CCI Italia (624)" amount={-gastoSubCCI} indent/>
+                            <Row label="Subcontratistas BMB (624)" amount={-gastoBMB} indent/>
+                            <Row label="Asesor fiscal La Clau (623)" amount={-gastoLaClau} indent/>
+                            <Row label="Retribución administrador (640)" amount={-gastoNomina} indent/>
+                            <Row label="Compra maquinaria/MTO (224)" amount={-gastoMTO} indent/>
+                            <Row label="PAC IBKR SL (5722)" amount={-gastoIBKR} indent/>
+                            <Row label="Comisiones Revolut (626)" amount={-gastoRevolut} indent/>
+                            <Row label="AEAT pagos (475)" amount={-gastoAEAT} indent/>
+                            <Row label="Otros gastos (629)" amount={-(gastoCar+gastoOtros)} indent separator/>
+                            <Row label="EBITDA" amount={ebitda} bold color={ebitda>=0?"#b8860b":"#E30613"} separator/>
+                            <Row label="Amortizaciones (681)" amount={-amort} indent separator/>
+                            <Row label="EBIT (Resultado explotación)" amount={ebit} bold color={ebit>=0?"#3949ab":"#E30613"} separator/>
+                            <Row label="Impuesto sobre Sociedades 15%" amount={-is} indent separator/>
+                            <Row label="RESULTADO NETO" amount={beneficioNeto} bold color={beneficioNeto>=0?"#28a745":"#E30613"} separator/>
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  );
+                })()}
+
+                {contabView==="bancos" && (() => {
+                  const mov = data.movements || [];
+                  const revolut = mov.filter(m=>m.account==="Revolut Business");
+                  const saldoRevolut = revolut.reduce((s,m)=>s+(m.type==="entrata"?1:-1)*(parseFloat(m.amount)||0),0);
+                  const ibkrNav = (data.ibkrPositions||[]).reduce((s,p)=>s+(parseFloat(p.totalEur)||0),0);
+                  const totalBancario = saldoRevolut + ibkrNav;
+
+                  const byMonth = {};
+                  revolut.forEach(m => {
+                    const mes = m.date?.slice(0,7);
+                    if (!byMonth[mes]) byMonth[mes]={ entrate:0, uscite:0 };
+                    if (m.type==="entrata") byMonth[mes].entrate += parseFloat(m.amount)||0;
+                    else byMonth[mes].uscite += parseFloat(m.amount)||0;
+                  });
+                  const monthData = Object.entries(byMonth).sort().map(([m,v])=>({
+                    mes: m.slice(5)+"/"+m.slice(2,4),
+                    entrate: v.entrate,
+                    uscite: v.uscite,
+                    neto: v.entrate - v.uscite
+                  }));
+
+                  return (
+                    <div>
+                      <div style={{ display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:14, marginBottom:20 }}>
+                        <div className="kpi-card blue">
+                          <div className="kpi-label">Revolut Business (572)</div>
+                          <div className="kpi-value" style={{ color: saldoRevolut>=0?"#3949ab":"#E30613" }}>{fmt(saldoRevolut)}</div>
+                          <div style={{ fontSize:10,color:"#bbb",marginTop:4 }}>IBAN ES32 1583 0001 1893 9775 2739</div>
+                        </div>
+                        <div className="kpi-card green">
+                          <div className="kpi-label">IBKR SL — Inversiones (5722)</div>
+                          <div className="kpi-value" style={{ color:"#28a745" }}>{fmt(ibkrNav)}</div>
+                          <div style={{ fontSize:10,color:"#bbb",marginTop:4 }}>Coste histórico — sin mark-to-market</div>
+                        </div>
+                        <div className="kpi-card">
+                          <div className="kpi-label">Total posición bancaria</div>
+                          <div className="kpi-value" style={{ color:"#E30613" }}>{fmt(totalBancario)}</div>
+                          <div style={{ fontSize:10,color:"#bbb",marginTop:4 }}>Revolut + IBKR SL</div>
+                        </div>
+                      </div>
+                      <div className="card" style={{ marginBottom:16 }}>
+                        <div style={{ fontSize:10,fontWeight:700,letterSpacing:"1.5px",textTransform:"uppercase",color:"#bbb",marginBottom:12 }}>Flujo mensual — Revolut Business</div>
+                        <div style={{ overflowX:"auto" }}>
+                          <table>
+                            <thead><tr><th>Mes</th><th style={{ textAlign:"right" }}>Entradas</th><th style={{ textAlign:"right" }}>Salidas</th><th style={{ textAlign:"right" }}>Neto</th></tr></thead>
+                            <tbody>{monthData.map(m=>(
+                              <tr key={m.mes}>
+                                <td style={{ fontWeight:600 }}>{m.mes}</td>
+                                <td style={{ textAlign:"right",color:"#28a745",fontWeight:600 }}>{fmt(m.entrate)}</td>
+                                <td style={{ textAlign:"right",color:"#E30613",fontWeight:600 }}>{fmt(m.uscite)}</td>
+                                <td style={{ textAlign:"right",fontWeight:700,color:m.neto>=0?"#3949ab":"#E30613" }}>{fmt(m.neto)}</td>
+                              </tr>
+                            ))}</tbody>
+                            <tfoot><tr style={{ background:"#F5F5F5" }}>
+                              <td style={{ fontWeight:700,padding:"10px 12px" }}>TOTAL</td>
+                              <td style={{ textAlign:"right",fontWeight:700,color:"#28a745",padding:"10px 12px" }}>{fmt(monthData.reduce((s,m)=>s+m.entrate,0))}</td>
+                              <td style={{ textAlign:"right",fontWeight:700,color:"#E30613",padding:"10px 12px" }}>{fmt(monthData.reduce((s,m)=>s+m.uscite,0))}</td>
+                              <td style={{ textAlign:"right",fontWeight:700,color:saldoRevolut>=0?"#3949ab":"#E30613",padding:"10px 12px" }}>{fmt(saldoRevolut)}</td>
+                            </tr></tfoot>
+                          </table>
+                        </div>
+                      </div>
+                      <div className="card">
+                        <div style={{ fontSize:10,fontWeight:700,letterSpacing:"1.5px",textTransform:"uppercase",color:"#bbb",marginBottom:12 }}>Posición IBKR SL — Cartera ETF</div>
+                        {(data.ibkrPositions||[]).length===0 ? <div style={{ color:"#bbb",fontSize:13 }}>Sin operaciones IBKR registradas.</div> : (() => {
+                          const byTicker = {};
+                          (data.ibkrPositions||[]).forEach(p => {
+                            if (!byTicker[p.ticker]) byTicker[p.ticker]={ shares:0, invested:0 };
+                            byTicker[p.ticker].shares += parseFloat(p.shares)||0;
+                            byTicker[p.ticker].invested += parseFloat(p.totalEur)||0;
+                          });
+                          return (
+                            <table>
+                              <thead><tr><th>Ticker</th><th style={{ textAlign:"right" }}>Participaciones</th><th style={{ textAlign:"right" }}>PMC</th><th style={{ textAlign:"right" }}>Coste total</th><th style={{ textAlign:"right" }}>% cartera</th></tr></thead>
+                              <tbody>{Object.entries(byTicker).map(([t,v])=>{
+                                const pmc = v.shares>0?v.invested/v.shares:0;
+                                const perc = ibkrNav>0?v.invested/ibkrNav*100:0;
+                                return (
+                                  <tr key={t}>
+                                    <td style={{ fontWeight:800,color:"#E30613",fontSize:15 }}>{t}</td>
+                                    <td style={{ textAlign:"right" }}>{v.shares.toFixed(4)}</td>
+                                    <td style={{ textAlign:"right" }}>{fmt(pmc)}</td>
+                                    <td style={{ textAlign:"right",fontWeight:600 }}>{fmt(v.invested)}</td>
+                                    <td style={{ textAlign:"right",color:"#999",fontSize:11 }}>{perc.toFixed(1)}%</td>
+                                  </tr>
+                                );
+                              })}</tbody>
+                              <tfoot><tr style={{ background:"#F5F5F5" }}>
+                                <td colSpan={3} style={{ fontWeight:700,padding:"10px 12px" }}>TOTAL (coste histórico)</td>
+                                <td style={{ textAlign:"right",fontWeight:700,color:"#E30613",padding:"10px 12px" }}>{fmt(ibkrNav)}</td>
+                                <td style={{ padding:"10px 12px" }}/>
+                              </tr></tfoot>
+                            </table>
+                          );
+                        })()}
+                      </div>
+                    </div>
+                  );
+                })()}
+
                 {contabView==="amortizacion" && (
                   <div>
                     <div style={{ background:"#fff8e1",border:"1.5px solid #ffe082",borderRadius:8,padding:"10px 14px",marginBottom:16,fontSize:12,color:"#b8860b" }}>
@@ -945,7 +1146,7 @@ export default function IberSilosApp() {
                   onMouseEnter={e=>e.currentTarget.style.borderColor="#E30613"}
                   onMouseLeave={e=>e.currentTarget.style.borderColor="#E0E0E0"}>
                   <div style={{ display:"flex",justifyContent:"space-between" }}>
-                    <span style={{ color:"#E30613",fontSize:13,fontWeight:700 }}>{inv.number} — {inv.type==="emitida"?inv.client:inv.supplier}</span>
+                    <span style={{ color:"#E30613",fontSize:13,fontWeight:700 }}>{inv.number} — {(inv.type==="emessa"||inv.type==="emitida")?inv.client:inv.supplier}</span>
                     <span style={{ fontWeight:600 }}>{fmt(inv.grossAmount)}</span>
                   </div>
                   <div style={{ color:"#bbb",fontSize:11,marginTop:3 }}>Scad. {fmtDate(inv.dueDate)} · {inv.description}</div>
@@ -985,7 +1186,7 @@ function StatusBadge({ status }) {
 
 function InvoiceTable({ invoices, onEdit, onDelete }) {
   const [filter, setFilter] = useState("todas");
-  const filtered = filter==="todas" ? invoices : invoices.filter(i=>i.type===filter);
+  const filtered = filter==="todas" ? invoices : invoices.filter(i=>i.type===filter||i.type===(filter==="emitida"?"emessa":filter==="recibida"?"ricevuta":filter));
   return (
     <div className="card">
       <div style={{ display:"flex",gap:6,marginBottom:16,alignItems:"center" }}>
@@ -1003,8 +1204,8 @@ function InvoiceTable({ invoices, onEdit, onDelete }) {
                 <td style={{ color:"#E30613",fontWeight:700,whiteSpace:"nowrap" }}>{inv.number||"—"}</td>
                 <td style={{ whiteSpace:"nowrap",color:"#999" }}>{fmtDate(inv.date)}</td>
                 <td style={{ whiteSpace:"nowrap",color:inv.dueDate<new Date().toISOString().split("T")[0]&&inv.status==="aperta"?"#E30613":"#999" }}>{fmtDate(inv.dueDate)}</td>
-                <td><span className={`badge ${inv.type==="emitida"?"badge-green":"badge-yellow"}`}>{inv.type}</span></td>
-                <td style={{ maxWidth:130,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap" }}>{inv.type==="emitida"?inv.client:inv.supplier}</td>
+                <td><span className={`badge ${(inv.type==="emessa"||inv.type==="emitida")?"badge-green":"badge-yellow"}`}>{inv.type}</span></td>
+                <td style={{ maxWidth:130,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap" }}>{(inv.type==="emessa"||inv.type==="emitida")?inv.client:inv.supplier}</td>
                 <td style={{ maxWidth:160,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",color:"#999",fontSize:12 }}>{inv.description}</td>
                 <td style={{ textAlign:"right",fontWeight:600 }}>{fmt(inv.netAmount)}</td>
                 <td style={{ color:"#bbb",fontSize:11 }}>{inv.ivaType}</td>
@@ -1041,7 +1242,7 @@ function MovementTable({ movements, invoices, onEdit, onDelete, onReconcile }) {
                   <td style={{ maxWidth:240,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap" }}>{m.description}</td>
                   <td style={{ color:m.type==="entrata"?"#28a745":"#E30613",fontWeight:700,whiteSpace:"nowrap" }}>{m.type==="entrata"?"+":"-"}{fmt(m.amount)}</td>
                   <td style={{ color:"#bbb",fontSize:11 }}>{m.account}</td>
-                  <td style={{ fontSize:11 }}>{linked?<span style={{ color:"#3949ab",fontWeight:600 }}>{linked.number} — {linked.type==="emitida"?linked.client:linked.supplier}</span>:<span style={{ color:"#E0E0E0" }}>—</span>}</td>
+                  <td style={{ fontSize:11 }}>{linked?<span style={{ color:"#3949ab",fontWeight:600 }}>{linked.number} — {(linked.type==="emessa"||linked.type==="emitida")?linked.client:linked.supplier}</span>:<span style={{ color:"#E0E0E0" }}>—</span>}</td>
                   <td>{m.reconciled?<span className="badge badge-green">abbinato</span>:<span className="badge badge-gray">libero</span>}</td>
                   <td style={{ whiteSpace:"nowrap" }}>
                     {!m.reconciled && <button className="btn-ghost" style={{ fontSize:11,marginRight:4,padding:"4px 8px" }} onClick={()=>onReconcile(m)}></button>}
@@ -1059,7 +1260,7 @@ function MovementTable({ movements, invoices, onEdit, onDelete, onReconcile }) {
 }
 
 function InvoiceModal({ inv, onSave, onClose }) {
-  const IVA_TYPES_KEYS = { "21%": 0.21, "RC (reverse charge)": 0, "Esente": 0, "0%": 0 };
+  const IVA_TYPES_KEYS = { "21%": 0.21, "10%": 0.10, "7%": 0.07, "RC (reverse charge)": 0, "Esente": 0, "0%": 0 };
   const [form, setForm] = useState({ ...inv });
   const set = (k, v) => setForm(f => {
     const updated = { ...f, [k]: v };
@@ -1075,12 +1276,12 @@ function InvoiceModal({ inv, onSave, onClose }) {
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal" onClick={e=>e.stopPropagation()}>
         <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20 }}>
-          <div className="modal-title">{form.id?"Editar factura":"Nueva factura"} — <span style={{ color:form.type==="emitida"?"#28a745":"#b8860b" }}>{form.type}</span></div>
+          <div className="modal-title">{form.id?"Editar factura":"Nueva factura"} — <span style={{ color:(form.type==="emessa"||form.type==="emitida")?"#28a745":"#b8860b" }}>{form.type}</span></div>
           <button onClick={onClose} style={{ background:"none",fontSize:20,color:"#999" }}>×</button>
         </div>
         <div className="form-row"><div style={{ display:"flex",gap:8 }}>
-          <button className={`tab-btn ${form.type==="emitida"?"active":""}`} onClick={()=>set("type","emitida")} style={{ flex:1 }}>Emessa</button>
-          <button className={`tab-btn ${form.type==="recibida"?"active":""}`} onClick={()=>set("type","recibida")} style={{ flex:1 }}>Ricevuta</button>
+          <button className={`tab-btn ${(form.type==="emessa"||form.type==="emitida")?"active":""}`} onClick={()=>set("type","emessa")} style={{ flex:1 }}>Emessa</button>
+          <button className={`tab-btn ${(form.type==="ricevuta"||form.type==="recibida")?"active":""}`} onClick={()=>set("type","ricevuta")} style={{ flex:1 }}>Ricevuta</button>
         </div></div>
         <div className="form-row form-row-2">
           <div><label>N° Factura</label><input value={form.number} onChange={e=>set("number",e.target.value)} placeholder="IBS-5816/2026/SE" /></div>
