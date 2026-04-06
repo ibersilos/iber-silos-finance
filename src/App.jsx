@@ -110,10 +110,7 @@ async function loadData() {
       d.ibkrPositions = toArray(d.ibkrPositions);
       d.asientos = toArray(d.asientos);
       d.fixedAssets = toArray(d.fixedAssets).length ? toArray(d.fixedAssets) : DEFAULT_ASSETS;
-      console.log("Firebase loaded:", d.invoices.length, "invoices,", d.movements.length, "movements");
       return d;
-    } else {
-      console.log("Firebase: no data at", DATA_REF);
     }
   } catch (e) { console.error("Firebase load error:", e); }
   return { invoices: [], movements: [], ibkrPositions: [], asientos: [], fixedAssets: DEFAULT_ASSETS };
@@ -765,7 +762,7 @@ export default function IberSilosApp() {
                   </div>
                 </div>
                 <div style={{ display:"flex",gap:6,marginBottom:20 }}>
-                  {[["diario","Libro Diario"],["mayor","Libro Mayor"],["comprobacion","Bal. Comprobación"],["amortizacion","Amortizaciones"]].map(([v,l])=>(
+                  {[["diario","Libro Diario"],["mayor","Libro Mayor"],["comprobacion","Bal. Comprobación"],["pyg","PyG"],["bancos","Bancos"],["amortizacion","Amortizaciones"]].map(([v,l])=>(
                     <button key={v} className={`tab-btn ${contabView===v?"active":""}`} style={{ fontSize:11,padding:"6px 14px" }} onClick={()=>setContabView(v)}>{l}</button>
                   ))}
                 </div>
@@ -883,6 +880,180 @@ export default function IberSilosApp() {
                     }
                   </div>
                 )}
+
+                {contabView==="pyg" && (() => {
+                  const inv = data.invoices || [];
+                  const mov = data.movements || [];
+                  const amort = (data.fixedAssets||DEFAULT_ASSETS).reduce((s,a) => s + calcAmortYear(a, new Date().getFullYear()), 0);
+
+                  // INGRESOS grupo 7
+                  const ingTransporte = inv.filter(i=>(i.type==="emessa"||i.type==="emitida")&&!["annullata"].includes(i.status)&&!i.number?.startsWith("R-")).reduce((s,i)=>s+(parseFloat(i.netAmount)||0),0);
+                  const ingRettifiche = inv.filter(i=>i.number?.startsWith("R-")).reduce((s,i)=>s+(parseFloat(i.netAmount)||0),0);
+                  const ingNetto = ingTransporte + ingRettifiche;
+
+                  // GASTOS grupo 6 — da movimenti categorizzati
+                  const gastoSubCCI = mov.filter(m=>m.type==="uscita"&&m.description?.includes("C.C.I")).reduce((s,m)=>s+(parseFloat(m.amount)||0),0);
+                  const gastoBMB = mov.filter(m=>m.type==="uscita"&&m.description?.includes("BMB")).reduce((s,m)=>s+(parseFloat(m.amount)||0),0);
+                  const gastoLaClau = mov.filter(m=>m.type==="uscita"&&m.description?.includes("La Clau")).reduce((s,m)=>s+(parseFloat(m.amount)||0),0);
+                  const gastoIBKR = mov.filter(m=>m.type==="uscita"&&m.description?.includes("Interactive Brokers")).reduce((s,m)=>s+(parseFloat(m.amount)||0),0);
+                  const gastoRevolut = mov.filter(m=>m.type==="uscita"&&m.notes?.includes("Comisión mensual")).reduce((s,m)=>s+(parseFloat(m.amount)||0),0);
+                  const gastoAEAT = mov.filter(m=>m.type==="uscita"&&m.description?.includes("AEAT")).reduce((s,m)=>s+(parseFloat(m.amount)||0),0);
+                  const gastoNomina = mov.filter(m=>m.type==="uscita"&&m.notes?.includes("administrador")).reduce((s,m)=>s+(parseFloat(m.amount)||0),0);
+                  const gastoMTO = mov.filter(m=>m.type==="uscita"&&m.description?.includes("MTO")).reduce((s,m)=>s+(parseFloat(m.amount)||0),0);
+                  const gastoCar = mov.filter(m=>m.type==="uscita"&&m.notes?.startsWith("CAR")||m.notes?.startsWith("Gasto")).reduce((s,m)=>s+(parseFloat(m.amount)||0),0);
+                  const gastoOtros = mov.filter(m=>m.type==="uscita"&&m.description?.includes("Truck Service")).reduce((s,m)=>s+(parseFloat(m.amount)||0),0);
+                  const totalGastos = gastoSubCCI + gastoBMB + gastoLaClau + gastoRevolut + gastoAEAT + gastoNomina + gastoMTO + gastoCar + gastoOtros;
+                  const ebitda = ingNetto - totalGastos;
+                  const ebit = ebitda - amort;
+                  const is = ebit > 0 ? ebit * 0.15 : 0;
+                  const beneficioNeto = ebit - is;
+
+                  const Row = ({label, amount, bold, indent, color, separator}) => (
+                    <tr style={{ borderBottom: separator?"2px solid #E0E0E0":"1px solid #F5F5F5" }}>
+                      <td style={{ padding:"8px 12px", fontSize:13, paddingLeft: indent?32:12, fontWeight:bold?700:400, color:color||"#1A1A1A" }}>{label}</td>
+                      <td style={{ padding:"8px 12px", textAlign:"right", fontWeight:bold?700:400, color: amount<0?"#E30613": amount>0&&bold?"#28a745":"#1A1A1A", fontSize:13 }}>{fmt(amount)}</td>
+                    </tr>
+                  );
+
+                  return (
+                    <div>
+                      <div style={{ background:"#fff8e1",border:"1.5px solid #ffe082",borderRadius:8,padding:"10px 14px",marginBottom:16,fontSize:12,color:"#b8860b" }}>
+                        Cuenta de Pérdidas y Ganancias — datos extraídos de movimientos Revolut + facturas. Verificar con La Clau para cierre fiscal oficial.
+                      </div>
+                      <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:14, marginBottom:20 }}>
+                        <div className="kpi-card green"><div className="kpi-label">Ingresos netos</div><div className="kpi-value" style={{ color:"#28a745" }}>{fmt(ingNetto)}</div></div>
+                        <div className="kpi-card yellow"><div className="kpi-label">EBITDA</div><div className="kpi-value" style={{ color: ebitda>=0?"#b8860b":"#E30613" }}>{fmt(ebitda)}</div></div>
+                        <div className="kpi-card"><div className="kpi-label">Resultado neto (IS 15%)</div><div className="kpi-value" style={{ color: beneficioNeto>=0?"#28a745":"#E30613" }}>{fmt(beneficioNeto)}</div></div>
+                      </div>
+                      <div className="card">
+                        <table>
+                          <thead><tr><th>Concepto</th><th style={{ textAlign:"right" }}>Importe</th></tr></thead>
+                          <tbody>
+                            <Row label="INGRESOS DE EXPLOTACIÓN" amount={ingNetto} bold color="#28a745" separator/>
+                            <Row label="Prestaciones de servicios (705/706)" amount={ingTransporte} indent/>
+                            <Row label="Rectificativas (R-)" amount={ingRettifiche} indent/>
+                            <Row label="" amount={0} separator/>
+                            <Row label="GASTOS DE EXPLOTACIÓN" amount={-totalGastos} bold color="#E30613" separator/>
+                            <Row label="Subcontratistas CCI Italia (624)" amount={-gastoSubCCI} indent/>
+                            <Row label="Subcontratistas BMB (624)" amount={-gastoBMB} indent/>
+                            <Row label="Asesor fiscal La Clau (623)" amount={-gastoLaClau} indent/>
+                            <Row label="Retribución administrador (640)" amount={-gastoNomina} indent/>
+                            <Row label="Compra maquinaria/MTO (224)" amount={-gastoMTO} indent/>
+                            <Row label="PAC IBKR SL (5722)" amount={-gastoIBKR} indent/>
+                            <Row label="Comisiones Revolut (626)" amount={-gastoRevolut} indent/>
+                            <Row label="AEAT pagos (475)" amount={-gastoAEAT} indent/>
+                            <Row label="Otros gastos (629)" amount={-(gastoCar+gastoOtros)} indent separator/>
+                            <Row label="EBITDA" amount={ebitda} bold color={ebitda>=0?"#b8860b":"#E30613"} separator/>
+                            <Row label="Amortizaciones (681)" amount={-amort} indent separator/>
+                            <Row label="EBIT (Resultado explotación)" amount={ebit} bold color={ebit>=0?"#3949ab":"#E30613"} separator/>
+                            <Row label="Impuesto sobre Sociedades 15%" amount={-is} indent separator/>
+                            <Row label="RESULTADO NETO" amount={beneficioNeto} bold color={beneficioNeto>=0?"#28a745":"#E30613"} separator/>
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  );
+                })()}
+
+                {contabView==="bancos" && (() => {
+                  const mov = data.movements || [];
+                  const revolut = mov.filter(m=>m.account==="Revolut Business");
+                  const saldoRevolut = revolut.reduce((s,m)=>s+(m.type==="entrata"?1:-1)*(parseFloat(m.amount)||0),0);
+                  const ibkrNav = (data.ibkrPositions||[]).reduce((s,p)=>s+(parseFloat(p.totalEur)||0),0);
+                  const totalBancario = saldoRevolut + ibkrNav;
+
+                  const byMonth = {};
+                  revolut.forEach(m => {
+                    const mes = m.date?.slice(0,7);
+                    if (!byMonth[mes]) byMonth[mes]={ entrate:0, uscite:0 };
+                    if (m.type==="entrata") byMonth[mes].entrate += parseFloat(m.amount)||0;
+                    else byMonth[mes].uscite += parseFloat(m.amount)||0;
+                  });
+                  const monthData = Object.entries(byMonth).sort().map(([m,v])=>({
+                    mes: m.slice(5)+"/"+m.slice(2,4),
+                    entrate: v.entrate,
+                    uscite: v.uscite,
+                    neto: v.entrate - v.uscite
+                  }));
+
+                  return (
+                    <div>
+                      <div style={{ display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:14, marginBottom:20 }}>
+                        <div className="kpi-card blue">
+                          <div className="kpi-label">Revolut Business (572)</div>
+                          <div className="kpi-value" style={{ color: saldoRevolut>=0?"#3949ab":"#E30613" }}>{fmt(saldoRevolut)}</div>
+                          <div style={{ fontSize:10,color:"#bbb",marginTop:4 }}>IBAN ES32 1583 0001 1893 9775 2739</div>
+                        </div>
+                        <div className="kpi-card green">
+                          <div className="kpi-label">IBKR SL — Inversiones (5722)</div>
+                          <div className="kpi-value" style={{ color:"#28a745" }}>{fmt(ibkrNav)}</div>
+                          <div style={{ fontSize:10,color:"#bbb",marginTop:4 }}>Coste histórico — sin mark-to-market</div>
+                        </div>
+                        <div className="kpi-card">
+                          <div className="kpi-label">Total posición bancaria</div>
+                          <div className="kpi-value" style={{ color:"#E30613" }}>{fmt(totalBancario)}</div>
+                          <div style={{ fontSize:10,color:"#bbb",marginTop:4 }}>Revolut + IBKR SL</div>
+                        </div>
+                      </div>
+                      <div className="card" style={{ marginBottom:16 }}>
+                        <div style={{ fontSize:10,fontWeight:700,letterSpacing:"1.5px",textTransform:"uppercase",color:"#bbb",marginBottom:12 }}>Flujo mensual — Revolut Business</div>
+                        <div style={{ overflowX:"auto" }}>
+                          <table>
+                            <thead><tr><th>Mes</th><th style={{ textAlign:"right" }}>Entradas</th><th style={{ textAlign:"right" }}>Salidas</th><th style={{ textAlign:"right" }}>Neto</th></tr></thead>
+                            <tbody>{monthData.map(m=>(
+                              <tr key={m.mes}>
+                                <td style={{ fontWeight:600 }}>{m.mes}</td>
+                                <td style={{ textAlign:"right",color:"#28a745",fontWeight:600 }}>{fmt(m.entrate)}</td>
+                                <td style={{ textAlign:"right",color:"#E30613",fontWeight:600 }}>{fmt(m.uscite)}</td>
+                                <td style={{ textAlign:"right",fontWeight:700,color:m.neto>=0?"#3949ab":"#E30613" }}>{fmt(m.neto)}</td>
+                              </tr>
+                            ))}</tbody>
+                            <tfoot><tr style={{ background:"#F5F5F5" }}>
+                              <td style={{ fontWeight:700,padding:"10px 12px" }}>TOTAL</td>
+                              <td style={{ textAlign:"right",fontWeight:700,color:"#28a745",padding:"10px 12px" }}>{fmt(monthData.reduce((s,m)=>s+m.entrate,0))}</td>
+                              <td style={{ textAlign:"right",fontWeight:700,color:"#E30613",padding:"10px 12px" }}>{fmt(monthData.reduce((s,m)=>s+m.uscite,0))}</td>
+                              <td style={{ textAlign:"right",fontWeight:700,color:saldoRevolut>=0?"#3949ab":"#E30613",padding:"10px 12px" }}>{fmt(saldoRevolut)}</td>
+                            </tr></tfoot>
+                          </table>
+                        </div>
+                      </div>
+                      <div className="card">
+                        <div style={{ fontSize:10,fontWeight:700,letterSpacing:"1.5px",textTransform:"uppercase",color:"#bbb",marginBottom:12 }}>Posición IBKR SL — Cartera ETF</div>
+                        {(data.ibkrPositions||[]).length===0 ? <div style={{ color:"#bbb",fontSize:13 }}>Sin operaciones IBKR registradas.</div> : (() => {
+                          const byTicker = {};
+                          (data.ibkrPositions||[]).forEach(p => {
+                            if (!byTicker[p.ticker]) byTicker[p.ticker]={ shares:0, invested:0 };
+                            byTicker[p.ticker].shares += parseFloat(p.shares)||0;
+                            byTicker[p.ticker].invested += parseFloat(p.totalEur)||0;
+                          });
+                          return (
+                            <table>
+                              <thead><tr><th>Ticker</th><th style={{ textAlign:"right" }}>Participaciones</th><th style={{ textAlign:"right" }}>PMC</th><th style={{ textAlign:"right" }}>Coste total</th><th style={{ textAlign:"right" }}>% cartera</th></tr></thead>
+                              <tbody>{Object.entries(byTicker).map(([t,v])=>{
+                                const pmc = v.shares>0?v.invested/v.shares:0;
+                                const perc = ibkrNav>0?v.invested/ibkrNav*100:0;
+                                return (
+                                  <tr key={t}>
+                                    <td style={{ fontWeight:800,color:"#E30613",fontSize:15 }}>{t}</td>
+                                    <td style={{ textAlign:"right" }}>{v.shares.toFixed(4)}</td>
+                                    <td style={{ textAlign:"right" }}>{fmt(pmc)}</td>
+                                    <td style={{ textAlign:"right",fontWeight:600 }}>{fmt(v.invested)}</td>
+                                    <td style={{ textAlign:"right",color:"#999",fontSize:11 }}>{perc.toFixed(1)}%</td>
+                                  </tr>
+                                );
+                              })}</tbody>
+                              <tfoot><tr style={{ background:"#F5F5F5" }}>
+                                <td colSpan={3} style={{ fontWeight:700,padding:"10px 12px" }}>TOTAL (coste histórico)</td>
+                                <td style={{ textAlign:"right",fontWeight:700,color:"#E30613",padding:"10px 12px" }}>{fmt(ibkrNav)}</td>
+                                <td style={{ padding:"10px 12px" }}/>
+                              </tr></tfoot>
+                            </table>
+                          );
+                        })()}
+                      </div>
+                    </div>
+                  );
+                })()}
 
                 {contabView==="amortizacion" && (
                   <div>
