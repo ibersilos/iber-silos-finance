@@ -22,6 +22,7 @@ const CLIENTS = ["Buzzatti", "Coder SA (Svizzera — art.21)", "Molino dalla Gio
 const SUPPLIERS = ["CCI Italia SRLS", "BMB Trasporti", "T-Way (renting)", "La Clau Assessors", "Gestrams", "Alma Bianca 2018 SL", "DKV", "E100", "MTO Logistics", "Truck Service Srl", "Altro"];
 const IVA_TYPES = { "21%": 0.21, "10%": 0.10, "7%": 0.07, "RC (reverse charge)": 0, "Esente": 0, "0%": 0 };
 const IBKR_ETFS = ["VWCE", "VUAA", "SEC0", "C50", "Altro"];
+const YAHOO_SYMBOLS = { "VWCE": "VWCE.AS", "VUAA": "VUAA.AS", "SEC0": "SEC0.DE", "C50": "C50.PA" };
 const STORAGE_KEY = "iber-silos-v2";
 
 const fmt = (n) => new Intl.NumberFormat("es-ES", { style: "currency", currency: "EUR", minimumFractionDigits: 2 }).format(n || 0);
@@ -261,6 +262,48 @@ function LoginScreen({ onLogin }) {
   );
 }
 
+
+// ── LIVE PRICES (Yahoo Finance) ───────────────────────────────────────────────
+function useLivePrices(tickers) {
+  const [prices, setPrices] = useState({});
+  const [lastUpdate, setLastUpdate] = useState(null);
+  const [loading, setLoading] = useState(false);
+
+  const fetchPrices = async () => {
+    if (!tickers || tickers.length === 0) return;
+    setLoading(true);
+    const results = {};
+    await Promise.all(tickers.map(async (ticker) => {
+      const symbol = YAHOO_SYMBOLS[ticker];
+      if (!symbol) return;
+      try {
+        const url = `https://query1.finance.yahoo.com/v8/finance/chart/${symbol}?interval=1d&range=2d`;
+        const resp = await fetch(url);
+        if (!resp.ok) return;
+        const data = await resp.json();
+        const meta = data?.chart?.result?.[0]?.meta;
+        if (!meta) return;
+        const price = meta.regularMarketPrice || meta.previousClose;
+        const prev = meta.previousClose || meta.chartPreviousClose;
+        const change = price - prev;
+        const changePct = prev > 0 ? (change / prev) * 100 : 0;
+        results[ticker] = { price, prev, change, changePct, currency: meta.currency || "EUR", symbol };
+      } catch (e) { console.error("Price fetch error", ticker, e); }
+    }));
+    setPrices(results);
+    setLastUpdate(new Date());
+    setLoading(false);
+  };
+
+  useEffect(() => {
+    fetchPrices();
+    const interval = setInterval(fetchPrices, 60000);
+    return () => clearInterval(interval);
+  }, [tickers.join(",")]);
+
+  return { prices, lastUpdate, loading, refresh: fetchPrices };
+}
+
 export default function IberSilosApp() {
   const [authenticated, setAuthenticated] = useState(() => !!sessionStorage.getItem('ibs_auth'));
   const [tab, setTab] = useState("dashboard");
@@ -292,6 +335,10 @@ export default function IberSilosApp() {
     const final = { ...inv, ivaAmount, grossAmount, id: inv.id || `inv-${Date.now()}` };
     if (!final.dueDate) final.dueDate = addDays(final.date, 30);
     const exists = data.invoices.find(i => i.id === final.id);
+    if (!exists && final.number) {
+      const dup = data.invoices.find(i => i.number && i.number.trim() === final.number.trim());
+      if (dup) { showToast(`⚠ DUPLICATO: N° ${final.number} già presente (${dup.type} - ${fmtDate(dup.date)})`, "err"); return; }
+    }
     const invoices = exists ? data.invoices.map(i => i.id === final.id ? final : i) : [...data.invoices, final];
     persist({ ...data, invoices });
     setInvoiceModal(null);
@@ -672,18 +719,7 @@ export default function IberSilosApp() {
                       const pmc = t.shares>0 ? t.totalInvested/t.shares : 0;
                       const perc = totalInvested>0 ? t.totalInvested/totalInvested*100 : 0;
                       return (
-                        <tr key={t.ticker}>
-                          <td style={{ fontWeight:800,color:"#E30613",fontSize:15 }}>{t.ticker}</td>
-                          <td style={{ textAlign:"right" }}>{t.shares.toFixed(4)}</td>
-                          <td style={{ textAlign:"right" }}>{fmt(pmc)}</td>
-                          <td style={{ textAlign:"right",fontWeight:600 }}>{fmt(t.shares*pmc)}</td>
-                          <td style={{ textAlign:"right" }}>
-                            <div style={{ display:"flex",alignItems:"center",justifyContent:"flex-end",gap:8 }}>
-                              <div style={{ width:60,height:4,background:"#F5F5F5",borderRadius:2 }}><div style={{ width:`${Math.min(perc,100)}%`,height:"100%",background:"#E30613",borderRadius:2 }}/></div>
-                              <span style={{ fontSize:11,color:"#999" }}>{perc.toFixed(1)}%</span>
-                            </div>
-                          </td>
-                        </tr>
+                        <IbkrTickerRow key={t.ticker} t={t} pmc={pmc} perc={perc} totalInvested={totalInvested} />
                       );
                     })}</tbody></table>
                   }
@@ -1170,6 +1206,96 @@ export default function IberSilosApp() {
 
 // ── SUB-COMPONENTS ─────────────────────────────────────────────────────────────
 
+
+// ── IBKR LIVE COMPONENTS ─────────────────────────────────────────────────────
+function LivePricesPanel({ tickers, totalInvested }) {
+  const tickerNames = tickers.map(t => t.ticker).filter(t => YAHOO_SYMBOLS[t]);
+  const { prices, lastUpdate, loading, refresh } = useLivePrices(tickerNames);
+  const totalMkt = tickers.reduce((s, t) => {
+    const p = prices[t.ticker];
+    return s + (p ? t.shares * p.price : 0);
+  }, 0);
+  const plTotale = totalMkt - totalInvested;
+  const plPct = totalInvested > 0 ? (plTotale / totalInvested) * 100 : 0;
+  const hasPrices = Object.keys(prices).length > 0;
+  return (
+    <div style={{ background:"#f8f9ff",border:"1.5px solid #c5cae9",borderRadius:10,padding:"14px 18px",marginBottom:16 }}>
+      <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12 }}>
+        <div style={{ fontSize:10,fontWeight:700,letterSpacing:"1.5px",textTransform:"uppercase",color:"#3949ab" }}>
+          Prezzi live — Yahoo Finance (15 min delay)
+        </div>
+        <div style={{ display:"flex",alignItems:"center",gap:10 }}>
+          {lastUpdate && <span style={{ fontSize:10,color:"#bbb" }}>Agg: {lastUpdate.toLocaleTimeString("it-IT",{hour:"2-digit",minute:"2-digit"})}</span>}
+          <button className="btn-ghost" style={{ fontSize:10,padding:"3px 10px" }} onClick={refresh} disabled={loading}>
+            {loading ? "..." : "Aggiorna"}
+          </button>
+        </div>
+      </div>
+      {hasPrices && (
+        <div style={{ display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(140px,1fr))",gap:10,marginBottom:14 }}>
+          {tickerNames.map(ticker => {
+            const p = prices[ticker];
+            if (!p) return null;
+            const pos = tickers.find(t => t.ticker === ticker);
+            const mkt = pos ? pos.shares * p.price : 0;
+            const pmc = pos && pos.shares > 0 ? pos.totalInvested / pos.shares : 0;
+            const pl = pos ? mkt - pos.totalInvested : 0;
+            const isPos = p.change >= 0;
+            return (
+              <div key={ticker} style={{ background:"white",borderRadius:8,padding:"10px 12px",border:`1.5px solid ${pl>=0?"#a5d6a7":"#ef9a9a"}` }}>
+                <div style={{ fontWeight:800,color:"#E30613",fontSize:14 }}>{ticker}</div>
+                <div style={{ fontSize:10,color:"#999",marginBottom:4 }}>
+                {ticker==="SEC0"?"iShares Semiconductors":ticker==="C50"?"Amundi Euro Stoxx 50":ticker==="VUAA"?"Vanguard S&P 500":ticker==="VWCE"?"Vanguard All-World":p.symbol}
+              </div>
+                <div style={{ fontWeight:700,fontSize:16 }}>{p.price.toFixed(2)} {p.currency}</div>
+                <div style={{ fontSize:11,color:isPos?"#28a745":"#E30613",fontWeight:600 }}>
+                  {isPos?"+":""}{p.change.toFixed(2)} ({isPos?"+":""}{p.changePct.toFixed(2)}%)
+                </div>
+                {pos && <div style={{ fontSize:11,color:pl>=0?"#28a745":"#E30613",marginTop:4,fontWeight:600 }}>
+                  P&L: {pl>=0?"+":""}{pl.toFixed(2)} EUR
+                </div>}
+              </div>
+            );
+          })}
+        </div>
+      )}
+      {hasPrices && (
+        <div style={{ display:"flex",gap:20,paddingTop:10,borderTop:"1px solid #e8eaf6" }}>
+          <div><span style={{ fontSize:10,color:"#bbb",fontWeight:700,textTransform:"uppercase" }}>Valore mercato</span><div style={{ fontWeight:800,fontSize:16,color:"#3949ab" }}>{totalMkt.toFixed(2)} EUR</div></div>
+          <div><span style={{ fontSize:10,color:"#bbb",fontWeight:700,textTransform:"uppercase" }}>Investito</span><div style={{ fontWeight:700,fontSize:15,color:"#666" }}>{totalInvested.toFixed(2)} EUR</div></div>
+          <div><span style={{ fontSize:10,color:"#bbb",fontWeight:700,textTransform:"uppercase" }}>P&L totale</span><div style={{ fontWeight:800,fontSize:16,color:plTotale>=0?"#28a745":"#E30613" }}>{plTotale>=0?"+":""}{plTotale.toFixed(2)} EUR ({plTotale>=0?"+":""}{plPct.toFixed(2)}%)</div></div>
+        </div>
+      )}
+      {!hasPrices && !loading && <div style={{ color:"#bbb",fontSize:12 }}>Dati non disponibili — mercato chiuso o errore di rete.</div>}
+      {loading && <div style={{ color:"#bbb",fontSize:12 }}>Caricamento prezzi...</div>}
+    </div>
+  );
+}
+
+function IbkrTickerRow({ t, pmc, perc, totalInvested }) {
+  const { prices } = useLivePrices([t.ticker]);
+  const p = prices[t.ticker];
+  const mktPrice = p ? p.price : null;
+  const mktValore = mktPrice ? t.shares * mktPrice : null;
+  const pl = mktValore !== null ? mktValore - t.totalInvested : null;
+  const plPct = t.totalInvested > 0 && pl !== null ? (pl / t.totalInvested) * 100 : null;
+  return (
+    <tr>
+      <td style={{ fontWeight:800,color:"#E30613",fontSize:15 }}>{t.ticker}</td>
+      <td style={{ textAlign:"right" }}>{t.shares.toFixed(4)}</td>
+      <td style={{ textAlign:"right" }}>{fmt(pmc)}</td>
+      <td style={{ textAlign:"right",fontWeight:600,color:"#3949ab" }}>{mktPrice ? `${mktPrice.toFixed(2)} EUR` : "—"}</td>
+      <td style={{ textAlign:"right",fontWeight:600,color:pl===null?"#bbb":pl>=0?"#28a745":"#E30613" }}>
+        {pl !== null ? `${pl>=0?"+":""}${pl.toFixed(2)}` : "—"}
+      </td>
+      <td style={{ textAlign:"right",fontSize:11,color:plPct===null?"#bbb":plPct>=0?"#28a745":"#E30613" }}>
+        {plPct !== null ? `${plPct>=0?"+":""}${plPct.toFixed(2)}%` : "—"}
+      </td>
+      <td style={{ textAlign:"right",fontWeight:700,color:"#3949ab" }}>{mktValore !== null ? fmt(mktValore) : fmt(t.shares*pmc)}</td>
+    </tr>
+  );
+}
+
 function KpiPill({ label, value, color }) {
   return (
     <div style={{ textAlign:"center" }}>
@@ -1259,11 +1385,65 @@ function MovementTable({ movements, invoices, onEdit, onDelete, onReconcile }) {
   );
 }
 
+// ── PDF PARSER ────────────────────────────────────────────────────────────────
+function parsePDFDate(str) {
+  if (!str) return null;
+  const m = str.match(/(\d{2})\/(\d{2})\/(\d{4})/);
+  return m ? `${m[3]}-${m[2]}-${m[1]}` : null;
+}
+async function parseInvoicePDF(file) {
+  return new Promise((resolve) => {
+    const reader = new FileReader();
+    reader.onload = async (e) => {
+      try {
+        const typedArray = new Uint8Array(e.target.result);
+        const pdfjsLib = window['pdfjs-dist/build/pdf'];
+        if (!pdfjsLib) { resolve(null); return; }
+        const pdf = await pdfjsLib.getDocument(typedArray).promise;
+        let text = '';
+        for (let i = 1; i <= pdf.numPages; i++) {
+          const page = await pdf.getPage(i);
+          const tc = await page.getTextContent();
+          text += tc.items.map(x => x.str).join(' ') + '
+';
+        }
+        const r = {};
+        const numM = text.match(/[Nn]úmero de factura[:\s]+([^\s
+]+)/i);
+        if (numM) r.number = numM[1].trim();
+        const opM = text.match(/Fecha de operación[:\s]+(\d{2}\/\d{2}\/\d{4})/i)
+                 || text.match(/Fecha de operacion[:\s]+(\d{2}\/\d{2}\/\d{4})/i);
+        if (opM) r.fechaOperacion = parsePDFDate(opM[1]);
+        const dtM = text.match(/^(\d{2}\/\d{2}\/\d{4})/m);
+        if (dtM) r.date = parsePDFDate(dtM[1]);
+        const duM = text.match(/Fecha de vencimiento[:\s]+(\d{2}\/\d{2}\/\d{4})/i);
+        if (duM) r.dueDate = parsePDFDate(duM[1]);
+        const refDate = r.fechaOperacion || r.date;
+        if (refDate) { const mes=parseInt(refDate.slice(5,7)), anno=parseInt(refDate.slice(0,4)); r.trimestreIVA=`Q${Math.ceil(mes/3)}-${anno}`; }
+        const baseM = text.match(/Total Base Imponible[:\s]+([\d.,]+)\s*€/i);
+        if (baseM) r.netAmount = parseFloat(baseM[1].replace(/\./g,'').replace(',','.'));
+        const ivaM = text.match(/(\d+)%\s+[\d.,]+\s*€/);
+        if (ivaM) r.ivaPercent = parseInt(ivaM[1]);
+        else if (/art\.2[15]|exenta|esente/i.test(text)) r.ivaPercent = 0;
+        resolve(Object.keys(r).length > 0 ? r : null);
+      } catch(err) { console.error('PDF parse error', err); resolve(null); }
+    };
+    reader.readAsArrayBuffer(file);
+  });
+}
+
 function InvoiceModal({ inv, onSave, onClose }) {
   const IVA_TYPES_KEYS = { "21%": 0.21, "10%": 0.10, "7%": 0.07, "RC (reverse charge)": 0, "Esente": 0, "0%": 0 };
   const [form, setForm] = useState({ ...inv });
+  const [pdfParsing, setPdfParsing] = useState(false);
+  const [pdfMsg, setPdfMsg] = useState(null);
+  const pdfRef = useRef();
   const set = (k, v) => setForm(f => {
     const updated = { ...f, [k]: v };
+    if (k === "fechaOperacion" && v) {
+      const mes = parseInt(v.slice(5,7)), anno = parseInt(v.slice(0,4));
+      updated.trimestreIVA = `Q${Math.ceil(mes/3)}-${anno}`;
+    }
     if (k==="netAmount"||k==="ivaType") {
       const net = parseFloat(k==="netAmount"?v:f.netAmount)||0;
       const rate = IVA_TYPES_KEYS[k==="ivaType"?v:f.ivaType]??0.21;
@@ -1272,30 +1452,71 @@ function InvoiceModal({ inv, onSave, onClose }) {
     }
     return updated;
   });
+  const handlePDF = async (e) => {
+    const file = e.target.files[0]; if (!file) return;
+    setPdfParsing(true); setPdfMsg(null);
+    const parsed = await parseInvoicePDF(file);
+    if (parsed) {
+      let ivaType = form.ivaType;
+      if (parsed.ivaPercent === 21) ivaType = "21%";
+      else if (parsed.ivaPercent === 10) ivaType = "10%";
+      else if (parsed.ivaPercent === 7) ivaType = "7%";
+      else if (parsed.ivaPercent === 0) ivaType = "Esente";
+      const net = parsed.netAmount || parseFloat(form.netAmount) || 0;
+      const rate = IVA_TYPES_KEYS[ivaType] ?? 0;
+      setForm(f => ({ ...f,
+        ...(parsed.number && { number: parsed.number }),
+        ...(parsed.date && { date: parsed.date }),
+        ...(parsed.dueDate && { dueDate: parsed.dueDate }),
+        ...(parsed.fechaOperacion && { fechaOperacion: parsed.fechaOperacion }),
+        ...(parsed.trimestreIVA && { trimestreIVA: parsed.trimestreIVA }),
+        ...(parsed.netAmount && { netAmount: parsed.netAmount }),
+        ivaType, ivaAmount: parseFloat((net*rate).toFixed(2)), grossAmount: parseFloat((net+net*rate).toFixed(2))
+      }));
+      setPdfMsg({ ok: true, msg: `Estratto: ${Object.keys(parsed).join(', ')}` });
+    } else {
+      setPdfMsg({ ok: false, msg: 'Parsing fallito — compila manualmente' });
+    }
+    setPdfParsing(false); e.target.value = "";
+  };
   return (
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal" onClick={e=>e.stopPropagation()}>
-        <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20 }}>
+        <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16 }}>
           <div className="modal-title">{form.id?"Editar factura":"Nueva factura"} — <span style={{ color:(form.type==="emessa"||form.type==="emitida")?"#28a745":"#b8860b" }}>{form.type}</span></div>
-          <button onClick={onClose} style={{ background:"none",fontSize:20,color:"#999" }}>×</button>
+          <button onClick={onClose} style={{ background:"none",fontSize:20,color:"#999" }}>x</button>
+        </div>
+        <div style={{ background:"#e8f4fd",border:"1.5px solid #90caf9",borderRadius:8,padding:"9px 13px",marginBottom:14,display:"flex",alignItems:"center",gap:10 }}>
+          <div style={{ flex:1 }}>
+            <div style={{ fontSize:11,fontWeight:700,color:"#1565c0" }}>PARSER PDF — precompila campi automaticamente</div>
+            {pdfMsg && <div style={{ fontSize:11,marginTop:2,color:pdfMsg.ok?"#2e7d32":"#E30613" }}>{pdfMsg.ok?"OK: ":""}{pdfMsg.msg}</div>}
+          </div>
+          <button className="btn-ghost" style={{ fontSize:11,whiteSpace:"nowrap" }} onClick={()=>pdfRef.current.click()} disabled={pdfParsing}>
+            {pdfParsing?"Parsing...":"Carica PDF"}
+          </button>
+          <input ref={pdfRef} type="file" accept=".pdf" onChange={handlePDF} style={{ display:"none" }} />
         </div>
         <div className="form-row"><div style={{ display:"flex",gap:8 }}>
           <button className={`tab-btn ${(form.type==="emessa"||form.type==="emitida")?"active":""}`} onClick={()=>set("type","emessa")} style={{ flex:1 }}>Emessa</button>
           <button className={`tab-btn ${(form.type==="ricevuta"||form.type==="recibida")?"active":""}`} onClick={()=>set("type","ricevuta")} style={{ flex:1 }}>Ricevuta</button>
         </div></div>
         <div className="form-row form-row-2">
-          <div><label>N° Factura</label><input value={form.number} onChange={e=>set("number",e.target.value)} placeholder="IBS-5816/2026/SE" /></div>
-          <div><label>Data</label><input type="date" value={form.date} onChange={e=>set("date",e.target.value)} /></div>
+          <div><label>N° Factura</label><input value={form.number} onChange={e=>set("number",e.target.value)} placeholder="2026-0001" /></div>
+          <div><label>Data emissione</label><input type="date" value={form.date} onChange={e=>set("date",e.target.value)} /></div>
+        </div>
+        <div className="form-row form-row-2">
+          <div><label style={{ color:"#E30613" }}>Fecha Operación ★ IVA</label><input type="date" value={form.fechaOperacion||""} onChange={e=>set("fechaOperacion",e.target.value)} style={{ borderColor:"#E30613" }} /></div>
+          <div><label>Trimestre IVA</label><input readOnly value={form.trimestreIVA||""} style={{ color:"#3949ab",fontWeight:700,background:"#f0f0ff" }} /></div>
         </div>
         <div className="form-row form-row-2">
           <div><label>Vencimiento</label><input type="date" value={form.dueDate} onChange={e=>set("dueDate",e.target.value)} /></div>
           <div><label>Stato</label><select value={form.status} onChange={e=>set("status",e.target.value)}>{["aperta","pagata","riconciliata","annullata"].map(s=><option key={s}>{s}</option>)}</select></div>
         </div>
-        {form.type==="emitida"
+        {(form.type==="emessa"||form.type==="emitida")
           ? <div className="form-row"><label>Cliente</label><select value={form.client} onChange={e=>set("client",e.target.value)}><option value="">Seleziona...</option>{CLIENTS.map(c=><option key={c}>{c}</option>)}</select></div>
           : <div className="form-row"><label>Fornitore</label><select value={form.supplier} onChange={e=>set("supplier",e.target.value)}><option value="">Seleziona...</option>{SUPPLIERS.map(s=><option key={s}>{s}</option>)}</select></div>
         }
-        <div className="form-row"><label>Descrizione</label><input value={form.description} onChange={e=>set("description",e.target.value)} placeholder="Servizi di trasporto — ordine..." /></div>
+        <div className="form-row"><label>Descrizione</label><input value={form.description} onChange={e=>set("description",e.target.value)} placeholder="Servizi di trasporto..." /></div>
         <div className="form-row form-row-2">
           <div><label>Imponibile (€)</label><input type="number" step="0.01" value={form.netAmount} onChange={e=>set("netAmount",e.target.value)} /></div>
           <div><label>Tipo IVA</label><select value={form.ivaType} onChange={e=>set("ivaType",e.target.value)}>{Object.keys(IVA_TYPES_KEYS).map(k=><option key={k}>{k}</option>)}</select></div>
@@ -1304,7 +1525,7 @@ function InvoiceModal({ inv, onSave, onClose }) {
           <div><label>IVA (€)</label><input readOnly value={form.ivaAmount||0} style={{ color:"#bbb" }} /></div>
           <div><label>Total bruto (€)</label><input readOnly value={form.grossAmount||0} style={{ color:"#E30613",fontWeight:700 }} /></div>
         </div>
-        <div className="form-row"><label>Enlace Dropbox documento</label><input value={form.dropboxLink} onChange={e=>set("dropboxLink",e.target.value)} placeholder="https://www.dropbox.com/..." /></div>
+        <div className="form-row"><label>Enlace Dropbox</label><input value={form.dropboxLink} onChange={e=>set("dropboxLink",e.target.value)} placeholder="https://www.dropbox.com/..." /></div>
         <div className="form-row"><label>Note</label><textarea rows={2} value={form.notes} onChange={e=>set("notes",e.target.value)} /></div>
         <div style={{ display:"flex",gap:8,marginTop:8 }}>
           <button className="btn-red" style={{ flex:1 }} onClick={()=>onSave(form)}>Guardar</button>
