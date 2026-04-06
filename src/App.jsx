@@ -94,16 +94,22 @@ function calcAmortAccumulated(asset, upToYear) {
 }
 
 // ── STORAGE — Firebase Realtime Database ──────────────────────────────────────
+const toArray = (val) => {
+  if (!val) return [];
+  if (Array.isArray(val)) return val;
+  return Object.values(val);
+};
+
 async function loadData() {
   try {
     const snapshot = await get(ref(db, DATA_REF));
     if (snapshot.exists()) {
       const d = snapshot.val();
-      if (!d.asientos) d.asientos = [];
-      if (!d.fixedAssets) d.fixedAssets = DEFAULT_ASSETS;
-      if (!d.ibkrPositions) d.ibkrPositions = [];
-      if (!d.invoices) d.invoices = [];
-      if (!d.movements) d.movements = [];
+      d.invoices = toArray(d.invoices);
+      d.movements = toArray(d.movements);
+      d.ibkrPositions = toArray(d.ibkrPositions);
+      d.asientos = toArray(d.asientos);
+      d.fixedAssets = toArray(d.fixedAssets).length ? toArray(d.fixedAssets) : DEFAULT_ASSETS;
       return d;
     }
   } catch (e) { console.error("Firebase load error:", e); }
