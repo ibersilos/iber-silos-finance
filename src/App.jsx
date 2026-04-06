@@ -133,7 +133,7 @@ function autoReconcile(movements, invoices) {
       if (mov.type === "uscita" && inv.type !== "recibida") return false;
       if (inv.status === "riconciliata") return false;
       if (Math.abs((parseFloat(inv.grossAmount) || 0) - amt) > 0.05) return false;
-      return Math.abs((new Date(inv.dueDate || inv.date) - movDate) / 86400000) <= 10;
+      return Math.abs((new Date(inv.dueDate || inv.date) - movDate) / 86400000) <= 30;
     });
     if (candidates.length === 1) { mov.invoiceId = candidates[0].id; mov.reconciled = true; mov._autoMatch = true; }
   });
