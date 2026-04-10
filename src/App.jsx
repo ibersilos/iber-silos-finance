@@ -919,73 +919,94 @@ export default function IberSilosApp() {
 
                 {contabView==="pyg" && (() => {
                   const inv = data.invoices || [];
-                  const mov = data.movements || [];
-                  const amort = (data.fixedAssets||DEFAULT_ASSETS).reduce((s,a) => s + calcAmortYear(a, new Date().getFullYear()), 0);
+                  const currentYear = new Date().getFullYear();
+                  const amort = (data.fixedAssets||DEFAULT_ASSETS).reduce((s,a) => s + calcAmortYear(a, currentYear), 0);
 
-                  // INGRESOS grupo 7
-                  const ingTransporte = inv.filter(i=>(i.type==="emessa"||i.type==="emitida")&&!["annullata"].includes(i.status)&&!i.number?.startsWith("R-")).reduce((s,i)=>s+(parseFloat(i.netAmount)||0),0);
-                  const ingRettifiche = inv.filter(i=>i.number?.startsWith("R-")).reduce((s,i)=>s+(parseFloat(i.netAmount)||0),0);
+                  // ── INGRESOS — da fatture emesse (tipo emessa/emitida), escluse annullate
+                  const invEmesse = inv.filter(i => (i.type==="emessa"||i.type==="emitida") && i.status!=="annullata");
+                  const ingTransporte = invEmesse.filter(i => !i.number?.startsWith("R-")).reduce((s,i)=>s+(parseFloat(i.netAmount)||0),0);
+                  const ingRettifiche = invEmesse.filter(i => i.number?.startsWith("R-")).reduce((s,i)=>s+(parseFloat(i.netAmount)||0),0);
+                  const ingNoleggi = invEmesse.filter(i => !i.number?.startsWith("R-") && (i.client==="BMB Trasporti"||i.description?.toLowerCase().includes("alquiler"))).reduce((s,i)=>s+(parseFloat(i.netAmount)||0),0);
                   const ingNetto = ingTransporte + ingRettifiche;
 
-                  // GASTOS grupo 6 — da movimenti categorizzati
-                  const gastoSubCCI = mov.filter(m=>m.type==="uscita"&&m.description?.includes("C.C.I")).reduce((s,m)=>s+(parseFloat(m.amount)||0),0);
-                  const gastoBMB = mov.filter(m=>m.type==="uscita"&&m.description?.includes("BMB")).reduce((s,m)=>s+(parseFloat(m.amount)||0),0);
-                  const gastoLaClau = mov.filter(m=>m.type==="uscita"&&m.description?.includes("La Clau")).reduce((s,m)=>s+(parseFloat(m.amount)||0),0);
-                  const gastoIBKR = mov.filter(m=>m.type==="uscita"&&m.description?.includes("Interactive Brokers")).reduce((s,m)=>s+(parseFloat(m.amount)||0),0);
-                  const gastoRevolut = mov.filter(m=>m.type==="uscita"&&m.notes?.includes("Comisión mensual")).reduce((s,m)=>s+(parseFloat(m.amount)||0),0);
-                  const gastoAEAT = mov.filter(m=>m.type==="uscita"&&m.description?.includes("AEAT")).reduce((s,m)=>s+(parseFloat(m.amount)||0),0);
-                  const gastoNomina = mov.filter(m=>m.type==="uscita"&&m.notes?.includes("administrador")).reduce((s,m)=>s+(parseFloat(m.amount)||0),0);
-                  const gastoMTO = mov.filter(m=>m.type==="uscita"&&m.description?.includes("MTO")).reduce((s,m)=>s+(parseFloat(m.amount)||0),0);
-                  const gastoCar = mov.filter(m=>m.type==="uscita"&&m.notes?.startsWith("CAR")||m.notes?.startsWith("Gasto")).reduce((s,m)=>s+(parseFloat(m.amount)||0),0);
-                  const gastoOtros = mov.filter(m=>m.type==="uscita"&&m.description?.includes("Truck Service")).reduce((s,m)=>s+(parseFloat(m.amount)||0),0);
-                  const totalGastos = gastoSubCCI + gastoBMB + gastoLaClau + gastoRevolut + gastoAEAT + gastoNomina + gastoMTO + gastoCar + gastoOtros;
-                  const ebitda = ingNetto - totalGastos;
+                  // ── GASTOS — da fatture ricevute (tipo ricevuta/recibida), escluse beni strumentali
+                  const invRicevute = inv.filter(i => (i.type==="ricevuta"||i.type==="recibida") && i.status!=="annullata");
+
+                  const gastoSubCCI    = invRicevute.filter(i=>i.supplier==="CCI Italia SRLS").reduce((s,i)=>s+(parseFloat(i.netAmount)||0),0);
+                  const gastoBMB      = invRicevute.filter(i=>i.supplier==="BMB Trasporti").reduce((s,i)=>s+(parseFloat(i.netAmount)||0),0);
+                  const gastoSubTot   = gastoSubCCI + gastoBMB;
+
+                  const gastoLaClau   = invRicevute.filter(i=>i.supplier==="La Clau Assessors").reduce((s,i)=>s+(parseFloat(i.netAmount)||0),0);
+                  const gastoRevolut  = invRicevute.filter(i=>i.description?.toLowerCase().includes("revolut")||i.description?.toLowerCase().includes("basic plan")).reduce((s,i)=>s+(parseFloat(i.netAmount)||0),0);
+                  const gastoOtros    = invRicevute.filter(i=>i.supplier!=="CCI Italia SRLS"&&i.supplier!=="BMB Trasporti"&&i.supplier!=="La Clau Assessors"&&i.supplier!=="MTO Logistics"&&!i.description?.toLowerCase().includes("revolut")&&!i.description?.toLowerCase().includes("basic plan")).reduce((s,i)=>s+(parseFloat(i.netAmount)||0),0);
+
+                  // Nóminas — da movimenti (non hanno fattura ricevuta)
+                  const mov = data.movements || [];
+                  const gastoNominas  = mov.filter(m=>m.type==="uscita"&&(m.notes?.toLowerCase().includes("nómin")||m.notes?.toLowerCase().includes("nomin"))).reduce((s,m)=>s+(parseFloat(m.amount)||0),0);
+
+                  // Beni strumentali → NON in PyG, vanno ad ammortamento
+                  // gastoMTO escluso (conto 224, non 6xx)
+
+                  const totalGastosOp = gastoSubTot + gastoLaClau + gastoRevolut + gastoNominas + gastoOtros;
+                  const margine = ingNetto - gastoSubTot;
+                  const ebitda = ingNetto - totalGastosOp;
                   const ebit = ebitda - amort;
-                  const is = ebit > 0 ? ebit * 0.15 : 0;
+                  const aliquotaIS = 0.15;
+                  const is = ebit > 0 ? ebit * aliquotaIS : 0;
                   const beneficioNeto = ebit - is;
 
-                  const Row = ({label, amount, bold, indent, color, separator}) => (
+                  const Row = ({label, amount, bold, indent, color, separator, small}) => (
                     <tr style={{ borderBottom: separator?"2px solid #E0E0E0":"1px solid #F5F5F5" }}>
-                      <td style={{ padding:"8px 12px", fontSize:13, paddingLeft: indent?32:12, fontWeight:bold?700:400, color:color||"#1A1A1A" }}>{label}</td>
-                      <td style={{ padding:"8px 12px", textAlign:"right", fontWeight:bold?700:400, color: amount<0?"#E30613": amount>0&&bold?"#28a745":"#1A1A1A", fontSize:13 }}>{fmt(amount)}</td>
+                      <td style={{ padding:"8px 12px", fontSize:small?11:13, paddingLeft: indent?32:12, fontWeight:bold?700:400, color:color||"#1A1A1A" }}>{label}</td>
+                      <td style={{ padding:"8px 12px", textAlign:"right", fontWeight:bold?700:400, color: amount<0?"#E30613": amount>0&&bold?"#28a745":"#1A1A1A", fontSize:small?11:13 }}>{amount!==0||bold?fmt(amount):""}</td>
                     </tr>
                   );
 
                   return (
                     <div>
-                      <div style={{ background:"#fff8e1",border:"1.5px solid #ffe082",borderRadius:8,padding:"10px 14px",marginBottom:16,fontSize:12,color:"#b8860b" }}>
-                        Cuenta de Pérdidas y Ganancias — datos extraídos de movimientos Revolut + facturas. Verificar con La Clau para cierre fiscal oficial.
+                      <div style={{ background:"#e8f5e9",border:"1.5px solid #a5d6a7",borderRadius:8,padding:"10px 14px",marginBottom:16,fontSize:12,color:"#2e7d32" }}>
+                        <strong>PyG calcolato su fatture emesse/ricevute</strong> — metodo competenza, allineato IS. Margine lordo = ricavi − costi subvettori diretti.
                       </div>
-                      <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:14, marginBottom:20 }}>
-                        <div className="kpi-card green"><div className="kpi-label">Ingresos netos</div><div className="kpi-value" style={{ color:"#28a745" }}>{fmt(ingNetto)}</div></div>
-                        <div className="kpi-card yellow"><div className="kpi-label">EBITDA</div><div className="kpi-value" style={{ color: ebitda>=0?"#b8860b":"#E30613" }}>{fmt(ebitda)}</div></div>
-                        <div className="kpi-card"><div className="kpi-label">Resultado neto (IS 15%)</div><div className="kpi-value" style={{ color: beneficioNeto>=0?"#28a745":"#E30613" }}>{fmt(beneficioNeto)}</div></div>
+                      <div style={{ display:"grid", gridTemplateColumns:"repeat(4,1fr)", gap:14, marginBottom:20 }}>
+                        <div className="kpi-card green"><div className="kpi-label">Ricavi netti</div><div className="kpi-value" style={{ color:"#28a745",fontSize:18 }}>{fmt(ingNetto)}</div></div>
+                        <div className="kpi-card yellow"><div className="kpi-label">Margine lordo</div><div className="kpi-value" style={{ color:"#b8860b",fontSize:18 }}>{fmt(margine)}<span style={{fontSize:11,color:"#999",marginLeft:4}}>{ingNetto>0?(margine/ingNetto*100).toFixed(1):0}%</span></div></div>
+                        <div className="kpi-card blue"><div className="kpi-label">EBIT</div><div className="kpi-value" style={{ color:ebit>=0?"#3949ab":"#E30613",fontSize:18 }}>{fmt(ebit)}</div></div>
+                        <div className="kpi-card"><div className="kpi-label">Resultado neto IS 15%</div><div className="kpi-value" style={{ color:beneficioNeto>=0?"#28a745":"#E30613",fontSize:18 }}>{fmt(beneficioNeto)}</div></div>
                       </div>
                       <div className="card">
                         <table>
                           <thead><tr><th>Concepto</th><th style={{ textAlign:"right" }}>Importe</th></tr></thead>
                           <tbody>
-                            <Row label="INGRESOS DE EXPLOTACIÓN" amount={ingNetto} bold color="#28a745" separator/>
-                            <Row label="Prestaciones de servicios (705/706)" amount={ingTransporte} indent/>
-                            <Row label="Rectificativas (R-)" amount={ingRettifiche} indent/>
+                            <Row label="INGRESOS DE EXPLOTACIÓN (705/706)" amount={ingNetto} bold color="#28a745" separator/>
+                            <Row label="Servicios de transporte" amount={ingTransporte} indent small/>
+                            <Row label="Rectificativas" amount={ingRettifiche} indent small/>
                             <Row label="" amount={0} separator/>
-                            <Row label="GASTOS DE EXPLOTACIÓN" amount={-totalGastos} bold color="#E30613" separator/>
-                            <Row label="Subcontratistas CCI Italia (624)" amount={-gastoSubCCI} indent/>
-                            <Row label="Subcontratistas BMB (624)" amount={-gastoBMB} indent/>
-                            <Row label="Asesor fiscal La Clau (623)" amount={-gastoLaClau} indent/>
-                            <Row label="Retribución administrador (640)" amount={-gastoNomina} indent/>
-                            <Row label="Compra maquinaria/MTO (224)" amount={-gastoMTO} indent/>
-                            <Row label="PAC IBKR SL (5722)" amount={-gastoIBKR} indent/>
-                            <Row label="Comisiones Revolut (626)" amount={-gastoRevolut} indent/>
-                            <Row label="AEAT pagos (475)" amount={-gastoAEAT} indent/>
-                            <Row label="Otros gastos (629)" amount={-(gastoCar+gastoOtros)} indent separator/>
+                            <Row label="COSTE DE VENTAS — Subcontratistas (624)" amount={-gastoSubTot} bold color="#E30613" separator/>
+                            <Row label="CCI Italia SRLS" amount={-gastoSubCCI} indent small/>
+                            <Row label="BMB Trasporti (incl. noleggi)" amount={-gastoBMB} indent small/>
+                            <Row label="" amount={0} separator/>
+                            <Row label="MARGEN BRUTO" amount={margine} bold color={margine>=0?"#b8860b":"#E30613"} separator/>
+                            <Row label={`${ingNetto>0?(margine/ingNetto*100).toFixed(1):0}% sobre ingresos`} amount={0} indent small/>
+                            <Row label="" amount={0} separator/>
+                            <Row label="GASTOS OPERATIVOS" amount={-totalGastosOp+gastoSubTot} bold color="#E30613" separator/>
+                            <Row label="Asesoría La Clau (623)" amount={-gastoLaClau} indent small/>
+                            <Row label="Nóminas conductor + adm (640)" amount={-gastoNominas} indent small/>
+                            <Row label="Revolut Business fee (626)" amount={-gastoRevolut} indent small/>
+                            <Row label="Otros gastos deducibles (629)" amount={-gastoOtros} indent small/>
+                            <Row label="" amount={0} separator/>
                             <Row label="EBITDA" amount={ebitda} bold color={ebitda>=0?"#b8860b":"#E30613"} separator/>
-                            <Row label="Amortizaciones (681)" amount={-amort} indent separator/>
-                            <Row label="EBIT (Resultado explotación)" amount={ebit} bold color={ebit>=0?"#3949ab":"#E30613"} separator/>
-                            <Row label="Impuesto sobre Sociedades 15%" amount={-is} indent separator/>
+                            <Row label="Amortizaciones compresores (681)" amount={-amort} indent small/>
+                            <Row label="" amount={0} separator/>
+                            <Row label="EBIT — Resultado de explotación" amount={ebit} bold color={ebit>=0?"#3949ab":"#E30613"} separator/>
+                            <Row label={`Impuesto sobre Sociedades ${(aliquotaIS*100).toFixed(0)}% — micropyme nueva empresa`} amount={-is} indent small/>
+                            <Row label="" amount={0} separator/>
                             <Row label="RESULTADO NETO" amount={beneficioNeto} bold color={beneficioNeto>=0?"#28a745":"#E30613"} separator/>
                           </tbody>
                         </table>
+                        <div style={{marginTop:12,padding:"10px 14px",background:"#F5F5F5",borderRadius:8,fontSize:11,color:"#999"}}>
+                          Beni strumentali (MTO Logistics €7.000) esclusi dal PyG → attivati in conto 224, ammortamento 12%/anno incluso nell'EBITDA→EBIT.
+                          Nóminas: calcolate da movimenti bancari (pagamenti effettivi). Verificare con La Clau per SS patronale conductor.
+                        </div>
                       </div>
                     </div>
                   );
