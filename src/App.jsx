@@ -1428,10 +1428,9 @@ async function parseInvoicePDF(file) {
           text += tc.items.map(x => x.str).join(' ') + '\n';
         }
         const r = {};
-        const numM = text.match(/[Nn]úmero de factura[:\s]+([^\s
-]+)/i);
+        const numM = text.match(/[Nn]\u00FAmero de factura[:\s]+([^\s\n]+)/i);
         if (numM) r.number = numM[1].trim();
-        const opM = text.match(/Fecha de operación[:\s]+(\d{2}\/\d{2}\/\d{4})/i)
+        const opM = text.match(/Fecha de operaci\u00F3n[:\s]+(\d{2}\/\d{2}\/\d{4})/i)
                  || text.match(/Fecha de operacion[:\s]+(\d{2}\/\d{2}\/\d{4})/i);
         if (opM) r.fechaOperacion = parsePDFDate(opM[1]);
         const dtM = text.match(/^(\d{2}\/\d{2}\/\d{4})/m);
