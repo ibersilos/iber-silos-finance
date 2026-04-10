@@ -1425,8 +1425,7 @@ async function parseInvoicePDF(file) {
         for (let i = 1; i <= pdf.numPages; i++) {
           const page = await pdf.getPage(i);
           const tc = await page.getTextContent();
-          text += tc.items.map(x => x.str).join(' ') + '
-';
+          text += tc.items.map(x => x.str).join(' ') + '\n';
         }
         const r = {};
         const numM = text.match(/[Nn]úmero de factura[:\s]+([^\s
