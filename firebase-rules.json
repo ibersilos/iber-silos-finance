@@ -1,0 +1,10 @@
+{
+  "rules": {
+    "finance": {
+      "AC001": {
+        ".read": true,
+        ".write": true
+      }
+    }
+  }
+}
