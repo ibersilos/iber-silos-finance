@@ -414,13 +414,25 @@ export default function IberSilosApp() {
   // ── DERIVED METRICS ──
   const metrics = (() => {
     const inv = data.invoices, mov = data.movements;
-    const emesse = inv.filter(i=>i.type==="emessa"), ricevute = inv.filter(i=>i.type==="ricevuta");
+    const emesse = inv.filter(i=>i.type==="emessa"&&i.status!=="annullata");
+    const ricevute = inv.filter(i=>i.type==="ricevuta");
     const fatturato = emesse.reduce((s,i)=>s+(parseFloat(i.netAmount)||0),0);
     const costi = ricevute.reduce((s,i)=>s+(parseFloat(i.netAmount)||0),0);
     const creditiAperti = emesse.filter(i=>i.status==="aperta").reduce((s,i)=>s+(parseFloat(i.grossAmount)||0),0);
     const debitiAperti = ricevute.filter(i=>i.status==="aperta").reduce((s,i)=>s+(parseFloat(i.grossAmount)||0),0);
     const liquidita = mov.reduce((s,m)=>s+(m.type==="entrata"?1:-1)*(parseFloat(m.amount)||0),0);
-    return { fatturato, costi, margine:fatturato-costi, creditiAperti, debitiAperti, liquidita, marginePerc: fatturato>0?(fatturato-costi)/fatturato*100:0 };
+    // EBITDA: Fatturato - Costi subvettori - Costi fissi (escluso ammortz 681)
+    const subvettori = ["CCI Italia SRLS","BMB Trasporti"];
+    const costiSubvettori = ricevute.filter(i=>subvettori.includes(i.supplier)).reduce((s,i)=>s+(parseFloat(i.netAmount)||0),0);
+    const costiOperativi = ricevute.filter(i=>!subvettori.includes(i.supplier)).reduce((s,i)=>s+(parseFloat(i.netAmount)||0),0);
+    // Ammortamenti da asientos conto 681
+    const ammortamenti = (data.asientos||[]).reduce((s,a)=>s+(a.lineas||[]).filter(l=>l.cuenta==="681").reduce((ss,l)=>ss+(parseFloat(l.debe)||0),0),0);
+    const margineAgency = fatturato - costiSubvettori; // ricavo da commissioni
+    const ebitda = fatturato - costiSubvettori - costiOperativi;
+    const ebit = ebitda - ammortamenti;
+    const ebitdaPerc = fatturato>0 ? ebitda/fatturato*100 : 0;
+    const margine = fatturato - costi;
+    return { fatturato, costi, margine, creditiAperti, debitiAperti, liquidita, marginePerc: fatturato>0?(fatturato-costi)/fatturato*100:0, costiSubvettori, costiOperativi, ammortamenti, margineAgency, ebitda, ebit, ebitdaPerc };
   })();
 
   const forecast = buildForecast(data.invoices, data.movements);
@@ -506,8 +518,8 @@ export default function IberSilosApp() {
         <div style={{ flex:1 }} />
         <div style={{ display:"flex", gap:14, alignItems:"center" }}>
           <KpiPill label="Fatturato" value={fmt(metrics.fatturato)} color="#E30613" />
+          <KpiPill label="EBITDA" value={`${fmt(metrics.ebitda)} (${metrics.ebitdaPerc.toFixed(1)}%)`} color={metrics.ebitda>=0?"#9c27b0":"#E30613"} />
           <KpiPill label="Liquidità" value={fmt(metrics.liquidita)} color={metrics.liquidita>=0?"#28a745":"#E30613"} />
-          <KpiPill label="Crediti" value={fmt(metrics.creditiAperti)} color="#b8860b" />
         </div>
         <div style={{ display:"flex", gap:6 }}>
           <button className="btn-ghost" onClick={exportJSON} style={{ fontSize:11 }}>↓ Backup</button>
@@ -542,8 +554,9 @@ export default function IberSilosApp() {
               <div className="section-title" style={{ marginBottom:20 }}>Panoramica</div>
               <div style={{ display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:14, marginBottom:20 }}>
                 <div className="kpi-card"><div className="kpi-label">Fatturato netto</div><div className="kpi-value" style={{ color:"#E30613" }}>{fmt(metrics.fatturato)}</div></div>
-                <div className="kpi-card yellow"><div className="kpi-label">Costi netti</div><div className="kpi-value" style={{ color:"#b8860b" }}>{fmt(metrics.costi)}</div></div>
-                <div className="kpi-card green"><div className="kpi-label">Margine lordo</div><div className="kpi-value" style={{ color:metrics.margine>=0?"#28a745":"#E30613" }}>{fmt(metrics.margine)} <span style={{ fontSize:14, color:"#999" }}>{metrics.marginePerc.toFixed(1)}%</span></div></div>
+                <div className="kpi-card yellow"><div className="kpi-label">Costi subvettori</div><div className="kpi-value" style={{ color:"#b8860b" }}>{fmt(metrics.costiSubvettori)}</div><div style={{ fontSize:10,color:"#bbb",marginTop:2 }}>CCI Italia + BMB</div></div>
+                <div className="kpi-card green"><div className="kpi-label">Margine agenzia</div><div className="kpi-value" style={{ color:metrics.margineAgency>=0?"#28a745":"#E30613" }}>{fmt(metrics.margineAgency)} <span style={{ fontSize:13,color:"#999" }}>{metrics.fatturato>0?(metrics.margineAgency/metrics.fatturato*100).toFixed(1):0}%</span></div><div style={{ fontSize:10,color:"#bbb",marginTop:2 }}>Fat. - Subvettori</div></div>
+                <div className="kpi-card" style={{ borderLeftColor:"#9c27b0" }}><div className="kpi-label">EBITDA</div><div className="kpi-value" style={{ color:metrics.ebitda>=0?"#9c27b0":"#E30613" }}>{fmt(metrics.ebitda)} <span style={{ fontSize:13,color:"#999" }}>{metrics.ebitdaPerc.toFixed(1)}%</span></div><div style={{ fontSize:10,color:"#bbb",marginTop:2 }}>Escluso ammort. €{metrics.ammortamenti.toFixed(0)}</div></div>
                 <div className="kpi-card yellow"><div className="kpi-label">Crediti aperti</div><div className="kpi-value" style={{ color:"#b8860b" }}>{fmt(metrics.creditiAperti)}</div></div>
                 <div className="kpi-card gray"><div className="kpi-label">Debiti aperti</div><div className="kpi-value" style={{ color:"#666" }}>{fmt(metrics.debitiAperti)}</div></div>
                 <div className="kpi-card blue"><div className="kpi-label">Liquidità stimata</div><div className="kpi-value" style={{ color:metrics.liquidita>=0?"#3949ab":"#E30613" }}>{fmt(metrics.liquidita)}</div></div>
