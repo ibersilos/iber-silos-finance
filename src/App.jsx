@@ -14,19 +14,6 @@ const today = () => new Date().toISOString().split("T")[0];
 const addDays = (d, n) => { const dt = new Date(d); dt.setDate(dt.getDate() + n); return dt.toISOString().split("T")[0]; };
 const getPacAmount = (ds) => { const d = new Date(ds); return (d.getFullYear() > 2026 || (d.getFullYear() === 2026 && d.getMonth() >= 6)) ? 500 : 300; };
 
-// Año fiscal Iber-Silos: EF1=20/01/2025–19/01/2026, EF2=20/01/2026–19/01/2027
-const EJERCICIOS = [
-  { id:"EF1", label:"EF1 (2025)", from:"2025-01-20", to:"2026-01-19" },
-  { id:"EF2", label:"EF2 (2026)", from:"2026-01-20", to:"2027-01-19" },
-  { id:"todos", label:"Todos", from:"2000-01-01", to:"2099-12-31" },
-];
-const getEjercicio = (date) => {
-  if (!date) return "todos";
-  if (date >= "2025-01-20" && date <= "2026-01-19") return "EF1";
-  if (date >= "2026-01-20" && date <= "2027-01-19") return "EF2";
-  return "todos";
-};
-
 // ── PGC ACCOUNTS ──────────────────────────────────────────────────────────────
 const PGC_ACCOUNTS = [
   { code:"100", name:"Capital social", group:"1", tipo:"pasivo" },
@@ -261,7 +248,6 @@ export default function IberSilosApp() {
   const [asientoModal, setAsientoModal] = useState(null);
   const [contabView, setContabView] = useState("diario");
   const [mayorCuenta, setMayorCuenta] = useState("572");
-  const [ejercicio, setEjercicio] = useState("EF2");
   const fileRef = useRef();
   const csvRef = useRef();
 
@@ -373,31 +359,14 @@ export default function IberSilosApp() {
 
   // ── DERIVED METRICS ──
   const metrics = (() => {
-    const ej = EJERCICIOS.find(e=>e.id===ejercicio) || EJERCICIOS[2];
-    const inv = data.invoices.filter(i=> { const d=i.fechaOperacion||i.date||""; return d>=ej.from&&d<=ej.to; });
-    const mov = data.movements.filter(m=> { const d=m.date||""; return d>=ej.from&&d<=ej.to; });
+    const inv = data.invoices, mov = data.movements;
     const emesse = inv.filter(i=>i.type==="emessa"), ricevute = inv.filter(i=>i.type==="ricevuta");
     const fatturato = emesse.reduce((s,i)=>s+(parseFloat(i.netAmount)||0),0);
     const costi = ricevute.reduce((s,i)=>s+(parseFloat(i.netAmount)||0),0);
     const creditiAperti = emesse.filter(i=>i.status==="aperta").reduce((s,i)=>s+(parseFloat(i.grossAmount)||0),0);
     const debitiAperti = ricevute.filter(i=>i.status==="aperta").reduce((s,i)=>s+(parseFloat(i.grossAmount)||0),0);
     const liquidita = mov.reduce((s,m)=>s+(m.type==="entrata"?1:-1)*(parseFloat(m.amount)||0),0);
-    // IVA per trimestre
-    const ivaByQ = {};
-    ["Q1","Q2","Q3","Q4"].forEach(q=>{ ivaByQ[q]={ soportado:0, repercutido:0 }; });
-    data.invoices.filter(i=> { const d=i.fechaOperacion||i.date||""; return d>=ej.from&&d<=ej.to; }).forEach(inv => {
-      const d = inv.fechaOperacion||inv.date||"";
-      const m = parseInt(d.slice(5,7));
-      const q = m<=3?"Q1":m<=6?"Q2":m<=9?"Q3":"Q4";
-      if (!ivaByQ[q]) ivaByQ[q]={ soportado:0, repercutido:0 };
-      if (inv.type==="ricevuta") ivaByQ[q].soportado += parseFloat(inv.ivaAmount)||0;
-      if (inv.type==="emessa")   ivaByQ[q].repercutido += parseFloat(inv.ivaAmount)||0;
-    });
-    const ivaAnual = { soportado:0, repercutido:0 };
-    Object.values(ivaByQ).forEach(q=>{ ivaAnual.soportado+=q.soportado; ivaAnual.repercutido+=q.repercutido; });
-    ivaAnual.credito = ivaAnual.soportado - ivaAnual.repercutido;
-    Object.keys(ivaByQ).forEach(q=>{ ivaByQ[q].credito = ivaByQ[q].soportado - ivaByQ[q].repercutido; });
-    return { fatturato, costi, margine:fatturato-costi, creditiAperti, debitiAperti, liquidita, marginePerc: fatturato>0?(fatturato-costi)/fatturato*100:0, ivaByQ, ivaAnual };
+    return { fatturato, costi, margine:fatturato-costi, creditiAperti, debitiAperti, liquidita, marginePerc: fatturato>0?(fatturato-costi)/fatturato*100:0 };
   })();
 
   const forecast = buildForecast(data.invoices, data.movements);
@@ -415,9 +384,9 @@ export default function IberSilosApp() {
 
   const TABS = [
     ["dashboard","","Dashboard"],
-    ["fatture","","Facturas"],
-    ["movimenti","","Movimientos"],
-    ["riconciliazione","","Conciliación"],
+    ["fatture","","Fatture"],
+    ["movimenti","","Movimenti"],
+    ["riconciliazione","","Riconcilia"],
     ["forecast","","Forecast"],
     ["ibkr","","IBKR SL"],
     ["contabilidad","","Contabilidad"],
@@ -482,12 +451,9 @@ export default function IberSilosApp() {
         <div style={{ fontSize:10, fontWeight:700, letterSpacing:"2px", textTransform:"uppercase", color:"#bbb" }}>Gestione Finanziaria</div>
         <div style={{ flex:1 }} />
         <div style={{ display:"flex", gap:14, alignItems:"center" }}>
-          <select value={ejercicio} onChange={e=>setEjercicio(e.target.value)} style={{ fontSize:11,padding:"5px 10px",border:"1.5px solid #E0E0E0",borderRadius:6,fontWeight:700,color:"#666",background:"white",width:"auto" }}>
-            {EJERCICIOS.map(e=><option key={e.id} value={e.id}>{e.label}</option>)}
-          </select>
-          <KpiPill label="Facturado" value={fmt(metrics.fatturato)} color="#E30613" />
-          <KpiPill label="Liquidez" value={fmt(metrics.liquidita)} color={metrics.liquidita>=0?"#28a745":"#E30613"} />
-          <KpiPill label="Créditos" value={fmt(metrics.creditiAperti)} color="#b8860b" />
+          <KpiPill label="Fatturato" value={fmt(metrics.fatturato)} color="#E30613" />
+          <KpiPill label="Liquidità" value={fmt(metrics.liquidita)} color={metrics.liquidita>=0?"#28a745":"#E30613"} />
+          <KpiPill label="Crediti" value={fmt(metrics.creditiAperti)} color="#b8860b" />
         </div>
         <div style={{ display:"flex", gap:6 }}>
           <button className="btn-ghost" onClick={exportJSON} style={{ fontSize:11 }}>↓ Backup</button>
@@ -518,48 +484,61 @@ export default function IberSilosApp() {
           {/* DASHBOARD */}
           {tab==="dashboard" && (
             <div>
-              <div className="section-title" style={{ marginBottom:20 }}>Resumen</div>
+              <div className="section-title" style={{ marginBottom:20 }}>Panoramica</div>
               <div style={{ display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:14, marginBottom:20 }}>
-                <div className="kpi-card"><div className="kpi-label">Facturado neto</div><div className="kpi-value" style={{ color:"#E30613" }}>{fmt(metrics.fatturato)}</div></div>
-                <div className="kpi-card yellow"><div className="kpi-label">Costes netos</div><div className="kpi-value" style={{ color:"#b8860b" }}>{fmt(metrics.costi)}</div></div>
-                <div className="kpi-card green"><div className="kpi-label">Margen bruto</div><div className="kpi-value" style={{ color:metrics.margine>=0?"#28a745":"#E30613" }}>{fmt(metrics.margine)} <span style={{ fontSize:14, color:"#999" }}>{metrics.marginePerc.toFixed(1)}%</span></div></div>
-                <div className="kpi-card yellow"><div className="kpi-label">Créditos abiertos</div><div className="kpi-value" style={{ color:"#b8860b" }}>{fmt(metrics.creditiAperti)}</div></div>
-                <div className="kpi-card gray"><div className="kpi-label">Débitos abiertos</div><div className="kpi-value" style={{ color:"#666" }}>{fmt(metrics.debitiAperti)}</div></div>
-                <div className="kpi-card blue"><div className="kpi-label">Liquidez estimada</div><div className="kpi-value" style={{ color:metrics.liquidita>=0?"#3949ab":"#E30613" }}>{fmt(metrics.liquidita)}</div></div>
+                <div className="kpi-card"><div className="kpi-label">Fatturato netto</div><div className="kpi-value" style={{ color:"#E30613" }}>{fmt(metrics.fatturato)}</div></div>
+                <div className="kpi-card yellow"><div className="kpi-label">Costi netti</div><div className="kpi-value" style={{ color:"#b8860b" }}>{fmt(metrics.costi)}</div></div>
+                <div className="kpi-card green"><div className="kpi-label">Margine lordo</div><div className="kpi-value" style={{ color:metrics.margine>=0?"#28a745":"#E30613" }}>{fmt(metrics.margine)} <span style={{ fontSize:14, color:"#999" }}>{metrics.marginePerc.toFixed(1)}%</span></div></div>
+                <div className="kpi-card yellow"><div className="kpi-label">Crediti aperti</div><div className="kpi-value" style={{ color:"#b8860b" }}>{fmt(metrics.creditiAperti)}</div></div>
+                <div className="kpi-card gray"><div className="kpi-label">Debiti aperti</div><div className="kpi-value" style={{ color:"#666" }}>{fmt(metrics.debitiAperti)}</div></div>
+                <div className="kpi-card blue"><div className="kpi-label">Liquidità stimata</div><div className="kpi-value" style={{ color:metrics.liquidita>=0?"#3949ab":"#E30613" }}>{fmt(metrics.liquidita)}</div></div>
               </div>
-              {/* IVA PER TRIMESTRE */}
-              <div className="card" style={{ marginBottom:16 }}>
-                <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14 }}>
-                  <div style={{ fontSize:10,fontWeight:700,letterSpacing:"1.5px",textTransform:"uppercase",color:"#bbb" }}>IVA a Crédito — REDEME</div>
-                  <div style={{ background:"#e8f5e9",border:"1.5px solid #a5d6a7",borderRadius:6,padding:"4px 12px",fontSize:11,fontWeight:700,color:"#2e7d32" }}>
-                    Anual: {fmt(metrics.ivaAnual?.credito||0)}
-                  </div>
-                </div>
-                <div style={{ display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:10,marginBottom:14 }}>
-                  {["Q1","Q2","Q3","Q4"].map(q=>{
-                    const d = metrics.ivaByQ?.[q]||{soportado:0,repercutido:0,credito:0};
-                    const hasData = d.soportado>0||d.repercutido>0;
-                    return (
-                      <div key={q} style={{ background:hasData?"#f8fffe":"#FAFAFA",border:`1.5px solid ${hasData?"#a5d6a7":"#E0E0E0"}`,borderRadius:8,padding:"10px 12px" }}>
-                        <div style={{ fontSize:10,fontWeight:700,color:"#bbb",letterSpacing:"0.1em",marginBottom:6 }}>{q}</div>
-                        <div style={{ fontSize:11,color:"#999",marginBottom:2 }}>Soportado: <span style={{ fontWeight:600,color:"#3949ab" }}>{fmt(d.soportado)}</span></div>
-                        <div style={{ fontSize:11,color:"#999",marginBottom:6 }}>Repercutido: <span style={{ fontWeight:600,color:"#E30613" }}>{fmt(d.repercutido)}</span></div>
-                        <div style={{ borderTop:"1px solid #E0E0E0",paddingTop:6 }}>
-                          <div style={{ fontSize:12,fontWeight:700,color:d.credito>0?"#2e7d32":"#E30613" }}>
-                            {d.credito>=0?"Crédito":"Deuda"}: {fmt(Math.abs(d.credito))}
-                          </div>
-                        </div>
+              {/* IVA PROGRESSIVO */}
+              {(() => {
+                const sop = metrics.ivaAnual?.soportado || 0;
+                const rep = metrics.ivaAnual?.repercutido || 0;
+                const credito = sop - rep;
+                const isCredito = credito >= 0;
+                const perc = sop > 0 ? Math.min((rep / sop) * 100, 100) : 0;
+                // Devolución REDEME: ultima entrata AEAT
+                const devol = data.movements.filter(m => m.type==="entrata" && (m.description||"").includes("AEAT")).reduce((s,m)=>s+(parseFloat(m.amount)||0),0);
+                return (
+                  <div className="card" style={{ marginBottom:16 }}>
+                    <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14 }}>
+                      <div style={{ fontSize:10,fontWeight:700,letterSpacing:"1.5px",textTransform:"uppercase",color:"#bbb" }}>IVA — REDEME</div>
+                      <span style={{ background:isCredito?"#e8f5e9":"#ffebee",border:`1.5px solid ${isCredito?"#a5d6a7":"#ef9a9a"}`,borderRadius:6,padding:"4px 12px",fontSize:12,fontWeight:800,color:isCredito?"#2e7d32":"#E30613" }}>
+                        {isCredito?"✓ Crédito":"⚠ Deuda"}: {fmt(Math.abs(credito))}
+                      </span>
+                    </div>
+                    <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:12,marginBottom:14 }}>
+                      <div style={{ textAlign:"center" }}>
+                        <div style={{ fontSize:10,color:"#bbb",fontWeight:700,letterSpacing:"0.1em",marginBottom:4 }}>SOPORTADO</div>
+                        <div style={{ fontSize:20,fontWeight:800,color:"#3949ab" }}>{fmt(sop)}</div>
+                        <div style={{ fontSize:10,color:"#bbb",marginTop:2 }}>IVA acquisti</div>
                       </div>
-                    );
-                  })}
-                </div>
-                <div style={{ background:"#f0f4ff",border:"1.5px solid #9fa8da",borderRadius:8,padding:"8px 14px",fontSize:11,color:"#3949ab",fontWeight:600 }}>
-                  REDEME activo — reembolso mensual · Soportado total: {fmt(metrics.ivaAnual?.soportado||0)} · Repercutido: {fmt(metrics.ivaAnual?.repercutido||0)}
-                </div>
-              </div>
+                      <div style={{ textAlign:"center" }}>
+                        <div style={{ fontSize:10,color:"#bbb",fontWeight:700,letterSpacing:"0.1em",marginBottom:4 }}>REPERCUTIDO</div>
+                        <div style={{ fontSize:20,fontWeight:800,color:"#E30613" }}>{fmt(rep)}</div>
+                        <div style={{ fontSize:10,color:"#bbb",marginTop:2 }}>IVA vendite</div>
+                      </div>
+                      <div style={{ textAlign:"center" }}>
+                        <div style={{ fontSize:10,color:"#bbb",fontWeight:700,letterSpacing:"0.1em",marginBottom:4 }}>DEVUELTO AEAT</div>
+                        <div style={{ fontSize:20,fontWeight:800,color:"#28a745" }}>{fmt(devol)}</div>
+                        <div style={{ fontSize:10,color:"#bbb",marginTop:2 }}>REDEME 2025</div>
+                      </div>
+                    </div>
+                    <div style={{ background:"#F5F5F5",borderRadius:6,height:10,overflow:"hidden",marginBottom:6 }}>
+                      <div style={{ height:"100%",borderRadius:6,background:isCredito?"linear-gradient(90deg,#3949ab,#28a745)":"linear-gradient(90deg,#E30613,#b8860b)",width:`${Math.max(perc,2)}%`,transition:"width 0.4s" }} />
+                    </div>
+                    <div style={{ fontSize:11,color:"#bbb",textAlign:"right" }}>
+                      Repercutido / Soportado: {perc.toFixed(1)}% · REDEME activo
+                    </div>
+                  </div>
+                );
+              })()}
 
               <div className="card" style={{ marginBottom:16 }}>
-                <div style={{ fontSize:10, fontWeight:700, letterSpacing:"1.5px", textTransform:"uppercase", color:"#bbb", marginBottom:12 }}>Forecast liquidez 90 días</div>
+                <div style={{ fontSize:10, fontWeight:700, letterSpacing:"1.5px", textTransform:"uppercase", color:"#bbb", marginBottom:12 }}>Forecast liquidità 90 giorni</div>
                 <ResponsiveContainer width="100%" height={180}>
                   <LineChart data={forecast}>
                     <CartesianGrid strokeDasharray="3 3" stroke="#F5F5F5" />
@@ -800,7 +779,7 @@ export default function IberSilosApp() {
                   </div>
                 </div>
                 <div style={{ display:"flex",gap:6,marginBottom:20 }}>
-                  {[["diario","Libro Diario"],["mayor","Libro Mayor"],["comprobacion","Bal. Comprobación"],["amortizacion","Amortizaciones"]].map(([v,l])=>(
+                  {[["diario","Libro Diario"],["mayor","Libro Mayor"],["comprobacion","Bal. Comprobación"],["amortizacion","Ammortamenti"]].map(([v,l])=>(
                     <button key={v} className={`tab-btn ${contabView===v?"active":""}`} style={{ fontSize:11,padding:"6px 14px" }} onClick={()=>setContabView(v)}>{l}</button>
                   ))}
                 </div>
