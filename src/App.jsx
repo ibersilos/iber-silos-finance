@@ -871,7 +871,14 @@ function DashboardTab({ data, metrics, forecast, ejercicio, EJERCICIOS, bimModal
                             <div style={{ fontSize:11,fontWeight:800,color:"#1A1A1A",marginBottom:6 }}>{t.id}</div>
                             <div style={{ fontWeight:800,fontSize:15,color:"#b8860b" }}>{fmt(d.tot)}</div>
                             <div style={{ fontSize:10,color:"#999",marginTop:2 }}>IVA recuperabile</div>
-                            {PAESI.map(p=>d[p]>0&&<div key={p} style={{ fontSize:10,color:"#666",marginTop:p==="IT"?3:0 }}>{flagMap[p]} {fmt(d[p])}</div>)}
+                            <div style={{ display:"flex",flexWrap:"wrap",gap:4,marginTop:6 }}>
+                              {PAESI.filter(p=>d[p]>0).map(p=>(
+                                <span key={p} style={{ display:"inline-flex",alignItems:"center",gap:3,background:"#F5F5F5",border:"1px solid #E0E0E0",borderRadius:20,padding:"2px 7px",fontSize:10,fontWeight:600,color:"#1A1A1A" }}>
+                                  <span style={{ fontSize:13 }}>{flagMap[p]}</span>
+                                  <span style={{ color:"#b8860b" }}>{fmt(d[p])}</span>
+                                </span>
+                              ))}
+                            </div>
                             <div style={{ marginTop:6,fontSize:10,fontWeight:700,color:ok?"#2e7d32":"#999" }}>
                               {d.tot>0?(ok?"✓ Apri pratica":"✗ Sotto soglia"):"-"}
                             </div>
@@ -883,7 +890,14 @@ function DashboardTab({ data, metrics, forecast, ejercicio, EJERCICIOS, bimModal
                       <div>
                         <span style={{ fontSize:12,fontWeight:700 }}>Totale recuperabile: </span>
                         <span style={{ fontSize:16,fontWeight:800,color:"#28a745" }}>{fmt(totAnnuo.tot)}</span>
-                        {totAnnuo.tot>0&&<span style={{ fontSize:11,color:"#666",marginLeft:12 }}>{PAESI.filter(p=>totAnnuo[p]>0).map(p=>`${flagMap[p]} ${fmt(totAnnuo[p])}`).join(" · ")}</span>}
+                        {totAnnuo.tot>0&&<div style={{ display:"flex",flexWrap:"wrap",gap:4,marginTop:6 }}>
+                        {PAESI.filter(p=>totAnnuo[p]>0).map(p=>(
+                          <span key={p} style={{ display:"inline-flex",alignItems:"center",gap:3,background:"#e8f5e9",border:"1px solid #a5d6a7",borderRadius:20,padding:"2px 8px",fontSize:11,fontWeight:700,color:"#2e7d32" }}>
+                            <span style={{ fontSize:13 }}>{flagMap[p]}</span>
+                            <span>{fmt(totAnnuo[p])}</span>
+                          </span>
+                        ))}
+                      </div>}
                       </div>
                       <div style={{ fontSize:11,color:"#bbb" }}>Scadenza: <strong style={{color:"#E30613"}}>30/09 anno succ.</strong></div>
                     </div>
