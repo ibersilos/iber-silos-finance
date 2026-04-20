@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { LineChart, Line, BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, ReferenceLine } from "recharts";
 
 // ── CONSTANTS ─────────────────────────────────────────────────────────────────
@@ -7,6 +7,13 @@ const SUPPLIERS = ["CCI Italia SRLS", "BMB Trasporti", "T-Way (renting)", "La Cl
 const IVA_TYPES = { "21%": 0.21, "RC (reverse charge)": 0, "Esente": 0, "0%": 0 };
 const IBKR_ETFS = ["VWCE", "VUAA", "SEC0", "C50", "Altro"];
 const STORAGE_KEY = "iber-silos-v2";
+
+// ── TAX & FINANCIAL CONSTANTS ─────────────────────────────────────────────────
+const IVA_RATES = { IT: 0.22, FR: 0.20, DE: 0.19, AT: 0.20, BE: 0.21, ES: 0.21 };
+const AMORT_RATES = { maquinaria: 0.12, equiposInfo: 0.25, vehiculos: 0.16 };
+const IVA_ESTERA_SOGLIA = 100;   // €/trimestre — sotto questa soglia non conviene pratica
+const IVA_FLAGS = { IT:"🇮🇹", FR:"🇫🇷", DE:"🇩🇪", AT:"🇦🇹", BE:"🇧🇪" };
+const IVA_PAESE_CONTI = { IT:"472.IT", FR:"472.FR", DE:"472.DE", AT:"472.AT", BE:"472.BE" };
 
 const fmt = (n) => new Intl.NumberFormat("es-ES", { style: "currency", currency: "EUR", minimumFractionDigits: 2 }).format(n || 0);
 const fmtDate = (d) => d ? new Date(d).toLocaleDateString("it-IT") : "—";
@@ -59,8 +66,8 @@ PGC_ACCOUNTS.forEach(a => { ACC_MAP[a.code] = a; });
 
 // ── FIXED ASSETS ──────────────────────────────────────────────────────────────
 const DEFAULT_ASSETS = [
-  { id:"comp1", name:"Compresor 1", account:"224", costEur:4000, dateAcq:"2025-01-20", rateAnnual:0.12 },
-  { id:"comp2", name:"Compresor 2", account:"224", costEur:3000, dateAcq:"2025-01-20", rateAnnual:0.12 },
+  { id:"comp1", name:"Compresor 1", account:"224", costEur:4000, dateAcq:"2025-01-20", rateAnnual:AMORT_RATES.maquinaria },
+  { id:"comp2", name:"Compresor 2", account:"224", costEur:3000, dateAcq:"2025-01-20", rateAnnual:AMORT_RATES.maquinaria },
 ];
 
 function calcAmortYear(asset, year) {
@@ -256,6 +263,7 @@ export default function IberSilosApp() {
   const [contabView, setContabView] = useState("diario");
   const [mayorCuenta, setMayorCuenta] = useState("572");
   const [ejercicio, setEjercicio] = useState("EF2");
+  const [bimModal, setBimModal] = useState(false);
   const fileRef = useRef();
   const csvRef = useRef();
 
@@ -366,7 +374,7 @@ export default function IberSilosApp() {
   };
 
   // ── DERIVED METRICS ──
-  const metrics = (() => {
+  const metrics = useMemo(() => {
     const ej = EJERCICIOS.find(e=>e.id===ejercicio)||EJERCICIOS[2];
     const inv = data.invoices.filter(i=>{ const d=i.fechaOperacion||i.date||""; return d>=ej.from&&d<=ej.to; });
     const mov = data.movements.filter(m=>{ const d=m.date||""; return d>=ej.from&&d<=ej.to; });
@@ -381,9 +389,10 @@ export default function IberSilosApp() {
     const ivaCredito = ivaSop - ivaRep;
     const ivaDevol = data.movements.filter(m=>m.type==="entrata"&&(m.description||"").includes("AEAT")).reduce((s,m)=>s+(parseFloat(m.amount)||0),0);
     return { fatturato, costi, margine:fatturato-costi, creditiAperti, debitiAperti, liquidita, marginePerc:fatturato>0?(fatturato-costi)/fatturato*100:0, ivaSop, ivaRep, ivaCredito, ivaDevol };
-  })();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data.invoices, data.movements, ejercicio]);
 
-  const forecast = buildForecast(data.invoices, data.movements);
+  const forecast = useMemo(() => buildForecast(data.invoices, data.movements), [data.invoices, data.movements]);
 
   if (!authenticated) return <LoginScreen onLogin={() => setAuthenticated(true)} />;
 
@@ -409,53 +418,66 @@ export default function IberSilosApp() {
   return (
     <div style={{ fontFamily:"'Segoe UI',Roboto,Helvetica,Arial,sans-serif", background:"#F5F5F5", minHeight:"100vh", color:"#1A1A1A", display:"flex", flexDirection:"column" }}>
       <style>{`
+        :root {
+          --red: var(--red);
+          --yellow: var(--yellow);
+          --dark: var(--dark);
+          --bg: var(--bg);
+          --border: var(--border);
+          --green: #28a745;
+          --blue: #3949ab;
+          --gold: #b8860b;
+          --white: #ffffff;
+          --text-muted: #999;
+          --shadow: 0 2px 10px rgba(0,0,0,0.07);
+        }
         * { box-sizing: border-box; margin: 0; padding: 0; }
-        ::-webkit-scrollbar { width: 5px; } ::-webkit-scrollbar-track { background: #F5F5F5; } ::-webkit-scrollbar-thumb { background: #ddd; border-radius: 3px; }
-        input, select, textarea { font-family: 'Segoe UI',Roboto,Arial,sans-serif; background: white; border: 1.5px solid #E0E0E0; color: #1A1A1A; padding: 8px 12px; border-radius: 8px; font-size: 13px; width: 100%; outline: none; transition: border-color 0.2s; }
-        input:focus, select:focus, textarea:focus { border-color: #E30613; box-shadow: 0 0 0 3px rgba(227,6,19,0.08); }
+        ::-webkit-scrollbar { width: 5px; } ::-webkit-scrollbar-track { background: var(--bg); } ::-webkit-scrollbar-thumb { background: #ddd; border-radius: 3px; }
+        input, select, textarea { font-family: 'Segoe UI',Roboto,Arial,sans-serif; background: white; border: 1.5px solid var(--border); color: var(--dark); padding: 8px 12px; border-radius: 8px; font-size: 13px; width: 100%; outline: none; transition: border-color 0.2s; }
+        input:focus, select:focus, textarea:focus { border-color: var(--red); box-shadow: 0 0 0 3px rgba(227,6,19,0.08); }
         select option { background: white; }
         button { font-family: 'Segoe UI',Roboto,Arial,sans-serif; cursor: pointer; border: none; border-radius: 8px; transition: all 0.15s; }
         table { width: 100%; border-collapse: collapse; }
-        th { text-align: left; font-size: 10px; letter-spacing: 0.12em; text-transform: uppercase; color: #bbb; padding: 10px 12px; border-bottom: 2px solid #F5F5F5; background: #FAFAFA; }
-        td { padding: 10px 12px; font-size: 13px; border-bottom: 1px solid #F5F5F5; }
+        th { text-align: left; font-size: 10px; letter-spacing: 0.12em; text-transform: uppercase; color: #bbb; padding: 10px 12px; border-bottom: 2px solid var(--bg); background: #FAFAFA; }
+        td { padding: 10px 12px; font-size: 13px; border-bottom: 1px solid var(--bg); }
         tr:hover td { background: #FFF5F5; }
-        .btn-red { background: #E30613; color: white; padding: 9px 20px; font-weight: 700; font-size: 13px; letter-spacing: 0.3px; box-shadow: 0 3px 10px rgba(227,6,19,0.25); }
+        .btn-red { background: var(--red); color: white; padding: 9px 20px; font-weight: 700; font-size: 13px; letter-spacing: 0.3px; box-shadow: 0 3px 10px rgba(227,6,19,0.25); }
         .btn-red:hover { background: #B8050F; }
-        .btn-ghost { background: white; color: #666; padding: 8px 16px; border: 1.5px solid #E0E0E0; font-size: 12px; font-weight: 600; }
-        .btn-ghost:hover { border-color: #E30613; color: #E30613; }
-        .btn-danger { background: transparent; color: #E30613; padding: 5px 10px; font-size: 11px; border: 1.5px solid rgba(227,6,19,0.3); }
+        .btn-ghost { background: white; color: #666; padding: 8px 16px; border: 1.5px solid var(--border); font-size: 12px; font-weight: 600; }
+        .btn-ghost:hover { border-color: var(--red); color: var(--red); }
+        .btn-danger { background: transparent; color: var(--red); padding: 5px 10px; font-size: 11px; border: 1.5px solid rgba(227,6,19,0.3); }
         .btn-danger:hover { background: rgba(227,6,19,0.05); }
         .badge { display:inline-block; padding: 2px 8px; border-radius: 4px; font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; font-weight: 700; }
         .badge-green { background: #e8f5e9; color: #2e7d32; border: 1px solid #a5d6a7; }
         .badge-yellow { background: #fffde7; color: #b8860b; border: 1px solid #ffe082; }
-        .badge-red { background: #ffebee; color: #E30613; border: 1px solid #ef9a9a; }
+        .badge-red { background: #ffebee; color: var(--red); border: 1px solid #ef9a9a; }
         .badge-blue { background: #e8eaf6; color: #3949ab; border: 1px solid #9fa8da; }
-        .badge-gray { background: #F5F5F5; color: #999; border: 1px solid #E0E0E0; }
+        .badge-gray { background: var(--bg); color: #999; border: 1px solid var(--border); }
         .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 100; display: flex; align-items: center; justify-content: center; padding: 20px; }
-        .modal { background: white; border-radius: 16px; border-top: 4px solid #E30613; padding: 28px; width: 100%; max-width: 580px; max-height: 90vh; overflow-y: auto; box-shadow: 0 20px 60px rgba(0,0,0,0.2); }
-        .modal-title { font-size: 15px; font-weight: 700; color: #E30613; letter-spacing: 0.3px; }
+        .modal { background: white; border-radius: 16px; border-top: 4px solid var(--red); padding: 28px; width: 100%; max-width: 580px; max-height: 90vh; overflow-y: auto; box-shadow: 0 20px 60px rgba(0,0,0,0.2); }
+        .modal-title { font-size: 15px; font-weight: 700; color: var(--red); letter-spacing: 0.3px; }
         .form-row { display: grid; gap: 14px; margin-bottom: 14px; }
         .form-row-2 { grid-template-columns: 1fr 1fr; }
         label { display: block; font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; color: #999; margin-bottom: 5px; font-weight: 700; }
-        .kpi-card { background: white; border-radius: 12px; padding: 18px 20px; box-shadow: 0 2px 10px rgba(0,0,0,0.07); border-left: 4px solid #E30613; }
-        .kpi-card.yellow { border-left-color: #F5C800; }
+        .kpi-card { background: white; border-radius: 12px; padding: 18px 20px; box-shadow: 0 2px 10px rgba(0,0,0,0.07); border-left: 4px solid var(--red); }
+        .kpi-card.yellow { border-left-color: var(--yellow); }
         .kpi-card.green { border-left-color: #28a745; }
         .kpi-card.blue { border-left-color: #3949ab; }
-        .kpi-card.gray { border-left-color: #E0E0E0; }
+        .kpi-card.gray { border-left-color: var(--border); }
         .kpi-value { font-size: 24px; font-weight: 800; margin: 4px 0 2px; line-height: 1; }
         .kpi-label { font-size: 10px; letter-spacing: 0.12em; text-transform: uppercase; color: #bbb; font-weight: 700; }
-        .section-title { font-size: 16px; font-weight: 800; display: flex; align-items: center; gap: 8px; text-transform: uppercase; letter-spacing: 1px; color: #1A1A1A; }
-        .section-title::before { content: ''; width: 4px; height: 20px; background: linear-gradient(to bottom, #E30613, #F5C800); border-radius: 2px; flex-shrink: 0; }
+        .section-title { font-size: 16px; font-weight: 800; display: flex; align-items: center; gap: 8px; text-transform: uppercase; letter-spacing: 1px; color: var(--dark); }
+        .section-title::before { content: ''; width: 4px; height: 20px; background: linear-gradient(to bottom, var(--red), var(--yellow)); border-radius: 2px; flex-shrink: 0; }
         .card { background: white; border-radius: 12px; padding: 18px; box-shadow: 0 2px 10px rgba(0,0,0,0.07); }
         .tab-btn { padding: 8px 16px; font-size: 12px; font-weight: 700; border-radius: 6px; background: transparent; color: #999; border: none; letter-spacing: 0.3px; transition: all 0.15s; }
-        .tab-btn:hover { color: #1A1A1A; background: #F5F5F5; }
-        .tab-btn.active { background: #E30613; color: white; }
+        .tab-btn:hover { color: var(--dark); background: var(--bg); }
+        .tab-btn.active { background: var(--red); color: white; }
         .nav-item { display: flex; align-items: center; gap: 10px; padding: 10px 16px; cursor: pointer; border-left: 3px solid transparent; font-size: 13px; font-weight: 600; color: #666; transition: all 0.15s; border: none; background: transparent; width: 100%; text-align: left; }
-        .nav-item:hover { background: #FFF5F5; color: #1A1A1A; }
-        .nav-item.active { background: #FFF0F0; border-left: 3px solid #E30613; color: #E30613; font-weight: 700; }
+        .nav-item:hover { background: #FFF5F5; color: var(--dark); }
+        .nav-item.active { background: #FFF0F0; border-left: 3px solid var(--red); color: var(--red); font-weight: 700; }
         .status-bar { position: fixed; bottom: 20px; right: 20px; z-index: 200; }
-        .progress-bar { background: #F5F5F5; border-radius: 4px; height: 5px; overflow: hidden; }
-        .progress-fill { height: 100%; border-radius: 4px; background: linear-gradient(90deg, #E30613, #F5C800); }
+        .progress-bar { background: var(--bg); border-radius: 4px; height: 5px; overflow: hidden; }
+        .progress-fill { height: 100%; border-radius: 4px; background: linear-gradient(90deg, var(--red), var(--yellow)); }
       `}</style>
 
       {/* ── HEADER ── */}
@@ -496,129 +518,10 @@ export default function IberSilosApp() {
         </aside>
 
         {/* ── CONTENT ── */}
-        <div style={{ flex:1, overflowY:"auto", padding:24 }}>
+        <div style={{ flex:1, overflowY:"auto", padding:24, scrollBehavior:"smooth" }}>
 
           {/* DASHBOARD */}
-          {tab==="dashboard" && (
-            <div>
-              <div className="section-title" style={{ marginBottom:20 }}>Panoramica</div>
-              <div style={{ display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:14, marginBottom:20 }}>
-                <div className="kpi-card"><div className="kpi-label">Facturado neto</div><div className="kpi-value" style={{ color:"#E30613" }}>{fmt(metrics.fatturato)}</div></div>
-                <div className="kpi-card yellow"><div className="kpi-label">Costes netos</div><div className="kpi-value" style={{ color:"#b8860b" }}>{fmt(metrics.costi)}</div></div>
-                <div className="kpi-card green"><div className="kpi-label">Margen bruto</div><div className="kpi-value" style={{ color:metrics.margine>=0?"#28a745":"#E30613" }}>{fmt(metrics.margine)} <span style={{ fontSize:14, color:"#999" }}>{metrics.marginePerc.toFixed(1)}%</span></div></div>
-                <div className="kpi-card yellow"><div className="kpi-label">Créditos abiertos</div><div className="kpi-value" style={{ color:"#b8860b" }}>{fmt(metrics.creditiAperti)}</div></div>
-                <div className="kpi-card gray"><div className="kpi-label">Débitos abiertos</div><div className="kpi-value" style={{ color:"#666" }}>{fmt(metrics.debitiAperti)}</div></div>
-                <div className="kpi-card blue"><div className="kpi-label">Liquidez estimada</div><div className="kpi-value" style={{ color:metrics.liquidita>=0?"#3949ab":"#E30613" }}>{fmt(metrics.liquidita)}</div></div>
-              </div>
-              {/* IVA PROGRESSIVO */}
-              {(() => {
-                const isCredito = metrics.ivaCredito >= 0;
-                const perc = metrics.ivaSop > 0 ? Math.min((metrics.ivaRep/metrics.ivaSop)*100,100) : 0;
-                return (
-                  <div className="card" style={{ marginBottom:16 }}>
-                    <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14 }}>
-                      <div style={{ fontSize:10,fontWeight:700,letterSpacing:"1.5px",textTransform:"uppercase",color:"#bbb" }}>IVA — REDEME</div>
-                      <span style={{ background:isCredito?"#e8f5e9":"#ffebee",border:`1.5px solid ${isCredito?"#a5d6a7":"#ef9a9a"}`,borderRadius:6,padding:"4px 12px",fontSize:12,fontWeight:800,color:isCredito?"#2e7d32":"#E30613" }}>
-                        {isCredito?"✓ Crédito":"⚠ Deuda"}: {fmt(Math.abs(metrics.ivaCredito))}
-                      </span>
-                    </div>
-                    <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:12,marginBottom:12 }}>
-                      <div style={{ textAlign:"center" }}>
-                        <div style={{ fontSize:10,color:"#bbb",fontWeight:700,letterSpacing:"0.1em",marginBottom:4 }}>SOPORTADO</div>
-                        <div style={{ fontSize:20,fontWeight:800,color:"#3949ab" }}>{fmt(metrics.ivaSop)}</div>
-                        <div style={{ fontSize:10,color:"#bbb",marginTop:2 }}>IVA acquisti</div>
-                      </div>
-                      <div style={{ textAlign:"center" }}>
-                        <div style={{ fontSize:10,color:"#bbb",fontWeight:700,letterSpacing:"0.1em",marginBottom:4 }}>REPERCUTIDO</div>
-                        <div style={{ fontSize:20,fontWeight:800,color:"#E30613" }}>{fmt(metrics.ivaRep)}</div>
-                        <div style={{ fontSize:10,color:"#bbb",marginTop:2 }}>IVA vendite</div>
-                      </div>
-                      <div style={{ textAlign:"center" }}>
-                        <div style={{ fontSize:10,color:"#bbb",fontWeight:700,letterSpacing:"0.1em",marginBottom:4 }}>DEVUELTO AEAT</div>
-                        <div style={{ fontSize:20,fontWeight:800,color:"#28a745" }}>{fmt(metrics.ivaDevol)}</div>
-                        <div style={{ fontSize:10,color:"#bbb",marginTop:2 }}>REDEME</div>
-                      </div>
-                    </div>
-                    <div style={{ background:"#F5F5F5",borderRadius:6,height:10,overflow:"hidden",marginBottom:5 }}>
-                      <div style={{ height:"100%",borderRadius:6,background:isCredito?"linear-gradient(90deg,#3949ab,#28a745)":"linear-gradient(90deg,#E30613,#b8860b)",width:`${Math.max(perc,2)}%`,transition:"width 0.4s" }} />
-                    </div>
-                    <div style={{ fontSize:11,color:"#bbb",textAlign:"right" }}>Repercutido/Soportado: {perc.toFixed(1)}% · REDEME activo</div>
-                  </div>
-                );
-              })()}
-
-              <div className="card" style={{ marginBottom:16 }}>
-                <div style={{ fontSize:10, fontWeight:700, letterSpacing:"1.5px", textTransform:"uppercase", color:"#bbb", marginBottom:12 }}>Forecast liquidez 90 días</div>
-                <ResponsiveContainer width="100%" height={180}>
-                  <LineChart data={forecast}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#F5F5F5" />
-                    <XAxis dataKey="day" tick={{ fontSize:10, fill:"#bbb" }} interval={4} />
-                    <YAxis tick={{ fontSize:10, fill:"#bbb" }} tickFormatter={v=>`${(v/1000).toFixed(0)}k`} />
-                    <Tooltip contentStyle={{ background:"white", border:"1.5px solid #E0E0E0", borderRadius:8, fontSize:12 }} formatter={(v)=>[fmt(v),"Liquidità"]} />
-                    <ReferenceLine y={0} stroke="rgba(227,6,19,0.3)" strokeDasharray="4 4" />
-                    <ReferenceLine y={30000} stroke="rgba(40,167,69,0.3)" strokeDasharray="4 4" />
-                    <Line type="monotone" dataKey="balance" stroke="#E30613" strokeWidth={2.5} dot={false} />
-                  </LineChart>
-                </ResponsiveContainer>
-              </div>
-              <div className="card">
-              {/* GRAFICO MENSILE FATTURE ATTIVE/PASSIVE */}
-              {(() => {
-                const ej = EJERCICIOS.find(e=>e.id===ejercicio)||EJERCICIOS[2];
-                const byMonth = {};
-                data.invoices.forEach(inv => {
-                  const d = inv.fechaOperacion || inv.date || "";
-                  if (!d || d < ej.from || d > ej.to) return;
-                  const m = d.slice(0,7);
-                  if (!byMonth[m]) byMonth[m] = { month: m.slice(5)+"/"+m.slice(2,4), attive: 0, passive: 0 };
-                  if (inv.type === "emessa")   byMonth[m].attive  += parseFloat(inv.netAmount)||0;
-                  if (inv.type === "ricevuta") byMonth[m].passive += parseFloat(inv.netAmount)||0;
-                });
-                const chartData = Object.values(byMonth).sort((a,b)=>a.month.localeCompare(b.month));
-                if (!chartData.length) return null;
-                return (
-                  <div className="card" style={{ marginBottom:16 }}>
-                    <div style={{ fontSize:10,fontWeight:700,letterSpacing:"1.5px",textTransform:"uppercase",color:"#bbb",marginBottom:16 }}>Fatturato mensile — Attivo vs Passivo</div>
-                    <div style={{ display:"flex",gap:16,marginBottom:10,fontSize:11 }}>
-                      <span style={{ display:"flex",alignItems:"center",gap:5 }}><span style={{ width:12,height:12,background:"#E30613",borderRadius:2,display:"inline-block" }}/> Fatture emesse</span>
-                      <span style={{ display:"flex",alignItems:"center",gap:5 }}><span style={{ width:12,height:12,background:"#3949ab",borderRadius:2,display:"inline-block" }}/> Fatture ricevute</span>
-                      <span style={{ display:"flex",alignItems:"center",gap:5 }}><span style={{ width:12,height:12,background:"#28a745",borderRadius:2,display:"inline-block" }}/> Margine</span>
-                    </div>
-                    <ResponsiveContainer width="100%" height={220}>
-                      <BarChart data={chartData} barGap={4} barCategoryGap="25%">
-                        <CartesianGrid strokeDasharray="3 3" stroke="#F5F5F5" vertical={false} />
-                        <XAxis dataKey="month" tick={{ fontSize:10,fill:"#bbb" }} axisLine={false} tickLine={false} />
-                        <YAxis tick={{ fontSize:10,fill:"#bbb" }} tickFormatter={v=>v>=1000?`${(v/1000).toFixed(0)}k`:`${v}`} axisLine={false} tickLine={false} />
-                        <Tooltip
-                          contentStyle={{ background:"white",border:"1.5px solid #E0E0E0",borderRadius:8,fontSize:12 }}
-                          formatter={(v,n)=>[fmt(v), n==="attive"?"Emesse":n==="passive"?"Ricevute":"Margine"]}
-                        />
-                        <Bar dataKey="attive"  fill="#E30613" radius={[4,4,0,0]} />
-                        <Bar dataKey="passive" fill="#3949ab" radius={[4,4,0,0]} />
-                        <Bar dataKey={(row)=>Math.max(0,row.attive-row.passive)} name="margine" fill="#28a745" radius={[4,4,0,0]} />
-                      </BarChart>
-                    </ResponsiveContainer>
-                  </div>
-                );
-              })()}
-
-                <div style={{ fontSize:10, fontWeight:700, letterSpacing:"1.5px", textTransform:"uppercase", color:"#bbb", marginBottom:12 }}>Últimas facturas</div>
-                {data.invoices.length===0 ? <div style={{ color:"#bbb", fontSize:13 }}>Nessuna fattura ancora.</div> :
-                  <table><thead><tr><th>N°</th><th>Data</th><th>Tipo</th><th>Controparte</th><th>Imponibile</th><th>Stato</th></tr></thead>
-                  <tbody>{data.invoices.slice(-8).reverse().map(inv=>(
-                    <tr key={inv.id}>
-                      <td style={{ fontWeight:700, color:"#E30613" }}>{inv.number||"—"}</td>
-                      <td>{fmtDate(inv.date)}</td>
-                      <td><span className={`badge ${inv.type==="emessa"?"badge-green":"badge-yellow"}`}>{inv.type}</span></td>
-                      <td>{inv.type==="emessa"?inv.client:inv.supplier}</td>
-                      <td style={{ fontWeight:600 }}>{fmt(inv.netAmount)}</td>
-                      <td><StatusBadge status={inv.status}/></td>
-                    </tr>
-                  ))}</tbody></table>
-                }
-              </div>
-            </div>
-          )}
+          {tab==="dashboard" && <DashboardTab data={data} metrics={metrics} forecast={forecast} ejercicio={ejercicio} EJERCICIOS={EJERCICIOS} bimModal={bimModal} setBimModal={setBimModal} />}
 
           {/* FATTURE */}
           {tab==="fatture" && (
@@ -705,6 +608,350 @@ export default function IberSilosApp() {
           )}
 
           {/* IBKR SL */}
+          {tab==="ibkr" && <IbkrTab data={data} setIbkrModal={setIbkrModal} deleteIbkr={deleteIbkr} />}
+
+          {/* CONTABILIDAD */}
+          {tab==="contabilidad" && <ContabilidadTab data={data} persist={persist} contabView={contabView} setContabView={setContabView} mayorCuenta={mayorCuenta} setMayorCuenta={setMayorCuenta} setAsientoModal={setAsientoModal} deleteAsiento={deleteAsiento} exportContabCSV={exportContabCSV} />}
+
+        </div>
+      </div>
+
+      {/* ── MODALS ── */}
+      {invoiceModal && <InvoiceModal inv={invoiceModal} onSave={saveInvoice} onClose={()=>setInvoiceModal(null)} />}
+      {movModal && <MovModal mov={movModal} onSave={saveMov} onClose={()=>setMovModal(null)} />}
+      {ibkrModal && (
+        <div className="modal-overlay" onClick={()=>setIbkrModal(null)}>
+          <div className="modal" onClick={e=>e.stopPropagation()}>
+            <div style={{ display:"flex",justifyContent:"space-between",marginBottom:20 }}>
+              <div className="modal-title">{ibkrModal.id?"Modifica operazione":"Nuova operazione"} IBKR SL</div>
+              <button onClick={()=>setIbkrModal(null)} style={{ background:"none",fontSize:20,color:"#999" }}>×</button>
+            </div>
+            <IbkrForm pos={ibkrModal} onSave={saveIbkr} onClose={()=>setIbkrModal(null)} />
+          </div>
+        </div>
+      )}
+      {reconcileModal && (
+        <div className="modal-overlay" onClick={()=>setReconcileModal(null)}>
+          <div className="modal" onClick={e=>e.stopPropagation()}>
+            <div style={{ display:"flex",justifyContent:"space-between",marginBottom:18 }}>
+              <div className="modal-title">Abbina movimento</div>
+              <button onClick={()=>setReconcileModal(null)} style={{ background:"none",fontSize:20,color:"#999" }}>×</button>
+            </div>
+            <div style={{ background:"#FFF5F5",border:"1.5px solid #ef9a9a",borderRadius:8,padding:14,marginBottom:18,fontSize:13 }}>
+              <div style={{ fontSize:10,fontWeight:700,letterSpacing:"0.1em",color:"#bbb",marginBottom:6 }}>MOVIMENTO</div>
+              <div style={{ fontWeight:600 }}>{fmtDate(reconcileModal.date)} — {reconcileModal.description}</div>
+              <div style={{ color:reconcileModal.type==="entrata"?"#28a745":"#E30613",fontWeight:700,marginTop:4 }}>{reconcileModal.type==="entrata"?"+":"-"}{fmt(reconcileModal.amount)}</div>
+            </div>
+            <div style={{ fontSize:10,fontWeight:700,letterSpacing:"0.1em",textTransform:"uppercase",color:"#bbb",marginBottom:10 }}>Fatture disponibili</div>
+            <div style={{ maxHeight:280,overflowY:"auto" }}>
+              {data.invoices.filter(i=>i.status!=="riconciliata"&&((reconcileModal.type==="entrata"&&i.type==="emessa")||(reconcileModal.type==="uscita"&&i.type==="ricevuta"))).map(inv=>(
+                <div key={inv.id} onClick={()=>manualReconcile(reconcileModal.id,inv.id)}
+                  style={{ padding:"12px 14px",borderRadius:8,border:"1.5px solid #E0E0E0",marginBottom:8,cursor:"pointer",transition:"all 0.15s" }}
+                  onMouseEnter={e=>e.currentTarget.style.borderColor="#E30613"}
+                  onMouseLeave={e=>e.currentTarget.style.borderColor="#E0E0E0"}>
+                  <div style={{ display:"flex",justifyContent:"space-between" }}>
+                    <span style={{ color:"#E30613",fontSize:13,fontWeight:700 }}>{inv.number} — {inv.type==="emessa"?inv.client:inv.supplier}</span>
+                    <span style={{ fontWeight:600 }}>{fmt(inv.grossAmount)}</span>
+                  </div>
+                  <div style={{ color:"#bbb",fontSize:11,marginTop:3 }}>Scad. {fmtDate(inv.dueDate)} · {inv.description}</div>
+                </div>
+              ))}
+            </div>
+            <button className="btn-ghost" style={{ marginTop:12,width:"100%" }} onClick={()=>setReconcileModal(null)}>Annulla</button>
+          </div>
+        </div>
+      )}
+      {asientoModal && <AsientoModal asiento={asientoModal} onSave={saveAsiento} onClose={()=>setAsientoModal(null)} />}
+
+
+      {bimModal && (
+        <div className="modal-overlay" onClick={()=>setBimModal(false)}>
+          <div className="modal" style={{ maxWidth:580 }} onClick={e=>e.stopPropagation()}>
+            <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20 }}>
+              <div className="modal-title">Recupero IVA Estera — Pratica Diretta</div>
+              <button onClick={()=>setBimModal(false)} style={{ background:"none",fontSize:20,color:"#999" }}>×</button>
+            </div>
+            <div style={{ background:"#fffde7",border:"1.5px solid #ffe082",borderRadius:8,padding:"10px 14px",marginBottom:18,fontSize:12,color:"#b8860b" }}>
+              Pratica trimestrale diretta (senza intermediario) · Scadenza: <strong>30/09 anno successivo</strong> · Soglia: <strong>IVA &gt; €{IVA_ESTERA_SOGLIA}/trimestre/paese</strong>
+            </div>
+            {[
+              { paese:"🇮🇹 Italia",  codice:"IT", aliquota:IVA_RATES.IT,
+                note:"Pedaggi autostradali DKV. Consorzio pedaggi italiani → sconto volumetrico fine anno.",
+                procedura:"Portale VIES + F-iva / modulo elettronico Agenzia Entrate italiana. Documenti: fatture DKV + estratto conto + delega.",
+                normativa:"Dir. 2008/9/CE — rimborso IVA UE" },
+              { paese:"🇫🇷 Francia", codice:"FR", aliquota:IVA_RATES.FR,
+                note:"Pedaggi DKV incluso Tunnel Fréjus. Verificare se DKV emette fattura separata per Francia.",
+                procedura:"Portale VIES + direction.impots.gouv.fr. Documenti: fatture DKV Francia + estratto conto.",
+                normativa:"Dir. 2008/9/CE — rimborso IVA UE" },
+            ].map(p=>(
+              <div key={p.codice} style={{ border:"1.5px solid #E0E0E0",borderRadius:10,padding:"16px",marginBottom:14 }}>
+                <div style={{ display:"flex",justifyContent:"space-between",marginBottom:10 }}>
+                  <div style={{ fontWeight:800,fontSize:15 }}>{p.paese}</div>
+                  <div style={{ fontSize:10,color:"#999" }}>{p.normativa}</div>
+                </div>
+                <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:12 }}>
+                  <div style={{ background:"#FAFAFA",borderRadius:6,padding:"8px 10px" }}>
+                    <div style={{ fontSize:10,color:"#bbb",fontWeight:700 }}>ALIQUOTA IVA</div>
+                    <div style={{ fontWeight:800,fontSize:18,color:"#1A1A1A" }}>{(p.aliquota*100).toFixed(0)}%</div>
+                  </div>
+                  <div style={{ background:"#FAFAFA",borderRadius:6,padding:"8px 10px" }}>
+                    <div style={{ fontSize:10,color:"#bbb",fontWeight:700 }}>SOGLIA MIN.</div>
+                    <div style={{ fontWeight:800,fontSize:18,color:"#28a745" }}>€100</div>
+                    <div style={{ fontSize:10,color:"#bbb" }}>IVA/trimestre</div>
+                  </div>
+                </div>
+                <div style={{ fontSize:11,color:"#666",marginBottom:8,lineHeight:1.5 }}><strong>Note:</strong> {p.note}</div>
+                <div style={{ fontSize:11,color:"#3949ab",background:"#f0f4ff",borderRadius:6,padding:"8px 10px",lineHeight:1.5 }}><strong>Procedura:</strong> {p.procedura}</div>
+              </div>
+            ))}
+            <button className="btn-ghost" style={{ width:"100%",marginTop:4 }} onClick={()=>setBimModal(false)}>Chiudi</button>
+          </div>
+        </div>
+      )}
+
+      {toast && (
+        <div style={{ position:"fixed",bottom:24,right:24,background:toast.type==="err"?"#ffebee":toast.type==="warn"?"#fffde7":"#e8f5e9",border:`1.5px solid ${toast.type==="err"?"#ef9a9a":toast.type==="warn"?"#ffe082":"#a5d6a7"}`,color:toast.type==="err"?"#c62828":toast.type==="warn"?"#b8860b":"#2e7d32",padding:"12px 20px",borderRadius:10,fontSize:13,fontWeight:600,zIndex:200,boxShadow:"0 4px 20px rgba(0,0,0,0.1)" }}>
+          {toast.msg}
+        </div>
+      )}
+    </div>
+  );
+}
+
+
+// ── DASHBOARD TAB ────────────────────────────────────────────────────────────
+function DashboardTab({ data, metrics, forecast, ejercicio, EJERCICIOS, bimModal, setBimModal }) {
+  return (
+
+            <div>
+              <div className="section-title" style={{ marginBottom:20 }}>Panoramica</div>
+              <div style={{ display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:14, marginBottom:20 }}>
+                <div className="kpi-card"><div className="kpi-label">Facturado neto</div><div className="kpi-value" style={{ color:"#E30613" }}>{fmt(metrics.fatturato)}</div></div>
+                <div className="kpi-card yellow"><div className="kpi-label">Costes netos</div><div className="kpi-value" style={{ color:"#b8860b" }}>{fmt(metrics.costi)}</div></div>
+                <div className="kpi-card green"><div className="kpi-label">Margen bruto</div><div className="kpi-value" style={{ color:metrics.margine>=0?"#28a745":"#E30613" }}>{fmt(metrics.margine)} <span style={{ fontSize:14, color:"#999" }}>{metrics.marginePerc.toFixed(1)}%</span></div></div>
+                <div className="kpi-card yellow"><div className="kpi-label">Créditos abiertos</div><div className="kpi-value" style={{ color:"#b8860b" }}>{fmt(metrics.creditiAperti)}</div></div>
+                <div className="kpi-card gray"><div className="kpi-label">Débitos abiertos</div><div className="kpi-value" style={{ color:"#666" }}>{fmt(metrics.debitiAperti)}</div></div>
+                <div className="kpi-card blue"><div className="kpi-label">Liquidez estimada</div><div className="kpi-value" style={{ color:metrics.liquidita>=0?"#3949ab":"#E30613" }}>{fmt(metrics.liquidita)}</div></div>
+              </div>
+              {/* IVA PROGRESSIVO */}
+              {(() => {
+                const { ivaSop, ivaRep, ivaCredito, ivaDevol } = metrics;
+                const isCredito = ivaCredito >= 0;
+                const perc = ivaSop > 0 ? Math.min((ivaRep/ivaSop)*100,100) : 0;
+                return (
+                  <div className="card" style={{ marginBottom:16 }}>
+                    <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14 }}>
+                      <div style={{ fontSize:10,fontWeight:700,letterSpacing:"1.5px",textTransform:"uppercase",color:"#bbb" }}>IVA — REDEME</div>
+                      <span style={{ background:isCredito?"#e8f5e9":"#ffebee",border:`1.5px solid ${isCredito?"#a5d6a7":"#ef9a9a"}`,borderRadius:6,padding:"4px 12px",fontSize:12,fontWeight:800,color:isCredito?"#2e7d32":"#E30613" }}>
+                        {isCredito?"✓ Crédito":"⚠ Deuda"}: {fmt(Math.abs(ivaCredito))}
+                      </span>
+                    </div>
+                    <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:12,marginBottom:12 }}>
+                      <div style={{ textAlign:"center" }}>
+                        <div style={{ fontSize:10,color:"#bbb",fontWeight:700,letterSpacing:"0.1em",marginBottom:4 }}>SOPORTADO</div>
+                        <div style={{ fontSize:20,fontWeight:800,color:"#3949ab" }}>{fmt(ivaSop)}</div>
+                        <div style={{ fontSize:10,color:"#bbb",marginTop:2 }}>IVA acquisti</div>
+                      </div>
+                      <div style={{ textAlign:"center" }}>
+                        <div style={{ fontSize:10,color:"#bbb",fontWeight:700,letterSpacing:"0.1em",marginBottom:4 }}>REPERCUTIDO</div>
+                        <div style={{ fontSize:20,fontWeight:800,color:"#E30613" }}>{fmt(ivaRep)}</div>
+                        <div style={{ fontSize:10,color:"#bbb",marginTop:2 }}>IVA vendite</div>
+                      </div>
+                      <div style={{ textAlign:"center" }}>
+                        <div style={{ fontSize:10,color:"#bbb",fontWeight:700,letterSpacing:"0.1em",marginBottom:4 }}>DEVUELTO AEAT</div>
+                        <div style={{ fontSize:20,fontWeight:800,color:"#28a745" }}>{fmt(ivaDevol)}</div>
+                        <div style={{ fontSize:10,color:"#bbb",marginTop:2 }}>REDEME</div>
+                      </div>
+                    </div>
+                    <div style={{ background:"#F5F5F5",borderRadius:6,height:10,overflow:"hidden",marginBottom:5 }}>
+                      <div style={{ height:"100%",borderRadius:6,background:isCredito?"linear-gradient(90deg,#3949ab,#28a745)":"linear-gradient(90deg,#E30613,#b8860b)",width:`${Math.max(perc,2)}%`,transition:"width 0.4s" }} />
+                    </div>
+                    <div style={{ fontSize:11,color:"#bbb",textAlign:"right" }}>Repercutido/Soportado: {perc.toFixed(1)}% · REDEME activo</div>
+                  </div>
+                );
+              })()}
+
+              <div className="card" style={{ marginBottom:16 }}>
+                <div style={{ fontSize:10, fontWeight:700, letterSpacing:"1.5px", textTransform:"uppercase", color:"#bbb", marginBottom:12 }}>Forecast liquidez 90 días</div>
+                <ResponsiveContainer width="100%" height={180}>
+                  <LineChart data={forecast}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#F5F5F5" />
+                    <XAxis dataKey="day" tick={{ fontSize:10, fill:"#bbb" }} interval={4} />
+                    <YAxis tick={{ fontSize:10, fill:"#bbb" }} tickFormatter={v=>`${(v/1000).toFixed(0)}k`} />
+                    <Tooltip contentStyle={{ background:"white", border:"1.5px solid #E0E0E0", borderRadius:8, fontSize:12 }} formatter={(v)=>[fmt(v),"Liquidità"]} />
+                    <ReferenceLine y={0} stroke="rgba(227,6,19,0.3)" strokeDasharray="4 4" />
+                    <ReferenceLine y={30000} stroke="rgba(40,167,69,0.3)" strokeDasharray="4 4" />
+                    <Line type="monotone" dataKey="balance" stroke="#E30613" strokeWidth={2.5} dot={false} />
+                  </LineChart>
+                </ResponsiveContainer>
+              </div>
+              <div className="card">
+
+              {/* RECUPERO IVA ESTERA — pratica diretta */}
+              {(() => {
+                const ej = EJERCICIOS.find(e=>e.id===ejercicio)||EJERCICIOS[2];
+                const paesi = [
+                  { paese:"🇮🇹 Italia",  codice:"IT", aliquota:IVA_RATES.IT },
+                  { paese:"🇫🇷 Francia", codice:"FR", aliquota:IVA_RATES.FR },
+                ];
+                const trimestri = [
+                  { id:"T1", mesi:[1,2,3] },
+                  { id:"T2", mesi:[4,5,6] },
+                  { id:"T3", mesi:[7,8,9] },
+                  { id:"T4", mesi:[10,11,12] },
+                ];
+                // Tutte le fatture ricevute estere con IVA nel periodo
+                // (es. DKV Germania, pedaggi Francia, qualsiasi fornitore estero con IVA)
+                const invEsteri = data.invoices.filter(inv=>{
+                  const d = inv.fechaOperacion||inv.date||"";
+                  return inv.type==="ricevuta" && d>=ej.from && d<=ej.to
+                    && (parseFloat(inv.ivaAmount)||0)>0
+                    && (inv.notes||inv.description||"").match(/(IT|FR|DE|AT|BE|NL|UK)|Italia|Francia|Germania|Austria|DKV/i);
+                });
+                // Movimenti uscita esteri (fallback se no fatture)
+                const movEsteri = data.movements.filter(m=>{
+                  const d=m.date||"";
+                  return d>=ej.from&&d<=ej.to&&m.type==="uscita"
+                    &&(m.description||"").match(/DKV|PEDAGGI|TOLL|VIACARD/i);
+                });
+                // Legge IVA estera da sottoconti 472.xx degli asientos
+                const ivaByTrim = {};
+                const PAESI = ["IT","FR","DE","AT","BE"];
+                const flagMap = IVA_FLAGS;
+                trimestri.forEach(t=>{ ivaByTrim[t.id]={IT:0,FR:0,DE:0,AT:0,BE:0,tot:0}; });
+                const paeseMap = {"472.IT":"IT","472.FR":"FR","472.DE":"DE","472.AT":"AT","472.BE":"BE"};
+                // Prima fonte: asientos con sottoconti 472.xx
+                (data.asientos||[]).forEach(asi=>{
+                  const d=asi.fecha||"";
+                  if(d<ej.from||d>ej.to) return;
+                  const mo=parseInt(d.slice(5,7));
+                  const t=mo<=3?"T1":mo<=6?"T2":mo<=9?"T3":"T4";
+                  (asi.lineas||[]).forEach(l=>{
+                    const paese=paeseMap[l.cuenta];
+                    if(!paese) return;
+                    const v=parseFloat(l.debe||0);
+                    if(v>0){ ivaByTrim[t][paese]+=v; ivaByTrim[t].tot+=v; }
+                  });
+                });
+                // Fallback: fatture ricevute estere se nessun asiento 472.xx
+                const hasSottoconti = Object.values(ivaByTrim).some(t=>t.tot>0);
+                if(!hasSottoconti){
+                  invEsteri.forEach(inv=>{
+                    const mo=parseInt((inv.fechaOperacion||inv.date||"").slice(5,7));
+                    const t=mo<=3?"T1":mo<=6?"T2":mo<=9?"T3":"T4";
+                    const iva=parseFloat(inv.ivaAmount)||0;
+                    const txt=(inv.notes||inv.description||"").toLowerCase();
+                    const paese=txt.includes("franc")||txt.includes("fréjus")?"FR":
+                                txt.includes("deuts")||txt.includes("dkv")?"DE":"IT";
+                    ivaByTrim[t][paese]+=iva; ivaByTrim[t].tot+=iva;
+                  });
+                  if(invEsteri.length===0){
+                    movEsteri.forEach(m=>{
+                      const mo=parseInt((m.date||"").slice(5,7));
+                      const t=mo<=3?"T1":mo<=6?"T2":mo<=9?"T3":"T4";
+                      const ivaIT=parseFloat(m.amount||0)*IVA_RATES.IT/(1+IVA_RATES.IT);
+                      ivaByTrim[t].IT+=ivaIT; ivaByTrim[t].tot+=ivaIT;
+                    });
+                  }
+                }
+                const totAnnuo = {IT:0,FR:0,DE:0,AT:0,BE:0,tot:0};
+                Object.values(ivaByTrim).forEach(t=>{ PAESI.forEach(p=>{ totAnnuo[p]+=t[p]; }); totAnnuo.tot+=t.tot; });
+                return (
+                  <div className="card" style={{ marginBottom:16, borderLeft:"4px solid #F5C800" }}>
+                    <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14 }}>
+                      <div style={{ fontSize:10,fontWeight:700,letterSpacing:"1.5px",textTransform:"uppercase",color:"#bbb" }}>Recupero IVA Estera — Pratica Diretta</div>
+                      <button className="btn-ghost" style={{ fontSize:11 }} onClick={()=>setBimModal(true)}>Dettaglio →</button>
+                    </div>
+                    <div style={{ display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:8,marginBottom:14 }}>
+                      {trimestri.map(t=>{
+                        const d=ivaByTrim[t.id];
+                        const ok=d.tot>IVA_ESTERA_SOGLIA;
+                        return (
+                          <div key={t.id} style={{ background:d.tot>0?"#fffde7":"#FAFAFA",border:`1.5px solid ${d.tot>0?"#ffe082":"#E0E0E0"}`,borderRadius:8,padding:"10px 12px",textAlign:"center" }}>
+                            <div style={{ fontSize:11,fontWeight:800,color:"#1A1A1A",marginBottom:6 }}>{t.id}</div>
+                            <div style={{ fontWeight:800,fontSize:15,color:"#b8860b" }}>{fmt(d.tot)}</div>
+                            <div style={{ fontSize:10,color:"#999",marginTop:2 }}>IVA recuperabile</div>
+                            {PAESI.map(p=>d[p]>0&&<div key={p} style={{ fontSize:10,color:"#666",marginTop:p==="IT"?3:0 }}>{flagMap[p]} {fmt(d[p])}</div>)}
+                            <div style={{ marginTop:6,fontSize:10,fontWeight:700,color:ok?"#2e7d32":"#999" }}>
+                              {d.tot>0?(ok?"✓ Apri pratica":"✗ Sotto soglia"):"-"}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                    <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",padding:"10px 14px",background:"#f8fffe",borderRadius:8,border:"1.5px solid #a5d6a7" }}>
+                      <div>
+                        <span style={{ fontSize:12,fontWeight:700 }}>Totale recuperabile: </span>
+                        <span style={{ fontSize:16,fontWeight:800,color:"#28a745" }}>{fmt(totAnnuo.tot)}</span>
+                        {totAnnuo.tot>0&&<span style={{ fontSize:11,color:"#666",marginLeft:12 }}>{PAESI.filter(p=>totAnnuo[p]>0).map(p=>`${flagMap[p]} ${fmt(totAnnuo[p])}`).join(" · ")}</span>}
+                      </div>
+                      <div style={{ fontSize:11,color:"#bbb" }}>Scadenza: <strong style={{color:"#E30613"}}>30/09 anno succ.</strong></div>
+                    </div>
+                  </div>
+                );
+              })()}
+
+              {/* GRAFICO MENSILE FATTURE ATTIVE/PASSIVE */}
+              {(() => {
+                const ej = EJERCICIOS.find(e=>e.id===ejercicio)||EJERCICIOS[2];
+                const byMonth = {};
+                data.invoices.forEach(inv => {
+                  const d = inv.fechaOperacion || inv.date || "";
+                  if (!d || d < ej.from || d > ej.to) return;
+                  const m = d.slice(0,7);
+                  if (!byMonth[m]) byMonth[m] = { month: m.slice(5)+"/"+m.slice(2,4), attive: 0, passive: 0 };
+                  if (inv.type === "emessa")   byMonth[m].attive  += parseFloat(inv.netAmount)||0;
+                  if (inv.type === "ricevuta") byMonth[m].passive += parseFloat(inv.netAmount)||0;
+                });
+                const chartData = Object.values(byMonth).sort((a,b)=>a.month.localeCompare(b.month));
+                if (!chartData.length) return null;
+                return (
+                  <div className="card" style={{ marginBottom:16 }}>
+                    <div style={{ fontSize:10,fontWeight:700,letterSpacing:"1.5px",textTransform:"uppercase",color:"#bbb",marginBottom:16 }}>Fatturato mensile — Attivo vs Passivo</div>
+                    <div style={{ display:"flex",gap:16,marginBottom:10,fontSize:11 }}>
+                      <span style={{ display:"flex",alignItems:"center",gap:5 }}><span style={{ width:12,height:12,background:"#E30613",borderRadius:2,display:"inline-block" }}/> Fatture emesse</span>
+                      <span style={{ display:"flex",alignItems:"center",gap:5 }}><span style={{ width:12,height:12,background:"#3949ab",borderRadius:2,display:"inline-block" }}/> Fatture ricevute</span>
+                      <span style={{ display:"flex",alignItems:"center",gap:5 }}><span style={{ width:12,height:12,background:"#28a745",borderRadius:2,display:"inline-block" }}/> Margine</span>
+                    </div>
+                    <ResponsiveContainer width="100%" height={220}>
+                      <BarChart data={chartData} barGap={4} barCategoryGap="25%">
+                        <CartesianGrid strokeDasharray="3 3" stroke="#F5F5F5" vertical={false} />
+                        <XAxis dataKey="month" tick={{ fontSize:10,fill:"#bbb" }} axisLine={false} tickLine={false} />
+                        <YAxis tick={{ fontSize:10,fill:"#bbb" }} tickFormatter={v=>v>=1000?`${(v/1000).toFixed(0)}k`:`${v}`} axisLine={false} tickLine={false} />
+                        <Tooltip
+                          contentStyle={{ background:"white",border:"1.5px solid #E0E0E0",borderRadius:8,fontSize:12 }}
+                          formatter={(v,n)=>[fmt(v), n==="attive"?"Emesse":n==="passive"?"Ricevute":"Margine"]}
+                        />
+                        <Bar dataKey="attive"  fill="#E30613" radius={[4,4,0,0]} />
+                        <Bar dataKey="passive" fill="#3949ab" radius={[4,4,0,0]} />
+                        <Bar dataKey={(row)=>Math.max(0,row.attive-row.passive)} name="margine" fill="#28a745" radius={[4,4,0,0]} />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </div>
+                );
+              })()}
+
+                <div style={{ fontSize:10, fontWeight:700, letterSpacing:"1.5px", textTransform:"uppercase", color:"#bbb", marginBottom:12 }}>Últimas facturas</div>
+                {data.invoices.length===0 ? <div style={{ color:"#bbb", fontSize:13 }}>Nessuna fattura ancora.</div> :
+                  <table><thead><tr><th>N°</th><th>Data</th><th>Tipo</th><th>Controparte</th><th>Imponibile</th><th>Stato</th></tr></thead>
+                  <tbody>{data.invoices.slice(-8).reverse().map(inv=>(
+                    <tr key={inv.id}>
+                      <td style={{ fontWeight:700, color:"#E30613" }}>{inv.number||"—"}</td>
+                      <td>{fmtDate(inv.date)}</td>
+                      <td><span className={`badge ${inv.type==="emessa"?"badge-green":"badge-yellow"}`}>{inv.type}</span></td>
+                      <td>{inv.type==="emessa"?inv.client:inv.supplier}</td>
+                      <td style={{ fontWeight:600 }}>{fmt(inv.netAmount)}</td>
+                      <td><StatusBadge status={inv.status}/></td>
+                    </tr>
+                  ))}</tbody></table>
+                }
+              </div>
+            </div>
+  );
+}
+
+// ── IBKR TAB ─────────────────────────────────────────────────────────────────
+function IbkrTab({ data, setIbkrModal, deleteIbkr }) {
           {tab==="ibkr" && (() => {
             const positions = data.ibkrPositions || [];
             const byTicker = {};
@@ -719,6 +966,7 @@ export default function IberSilosApp() {
             const pacByMonth = {};
             positions.filter(p=>p.type==="acquisto").forEach(p => { const m=p.date.slice(0,7); if(!pacByMonth[m]) pacByMonth[m]=0; pacByMonth[m]+=parseFloat(p.totalEur)||0; });
             const pacChart = Object.entries(pacByMonth).sort().map(([m,v])=>({ month:m.slice(5)+"/"+m.slice(2,4), investito:parseFloat(v.toFixed(2)), target:getPacAmount(m+"-15") }));
+
             return (
               <div>
                 <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20 }}>
@@ -774,7 +1022,7 @@ export default function IberSilosApp() {
                   <div style={{ fontSize:10,fontWeight:700,letterSpacing:"1.5px",textTransform:"uppercase",color:"#bbb",marginBottom:12 }}>Log operazioni</div>
                   {positions.length===0 ? <div style={{ color:"#bbb",fontSize:13 }}>Nessuna operazione.</div> :
                     <table><thead><tr><th>Data</th><th>Tipo</th><th>Ticker</th><th style={{ textAlign:"right" }}>Shares</th><th style={{ textAlign:"right" }}>Prezzo</th><th style={{ textAlign:"right" }}>Commissioni</th><th style={{ textAlign:"right" }}>Totale</th><th></th></tr></thead>
-                    <tbody>{[...positions].reverse().map(p=>(
+                    <tbody>{[...positions].reverse().map((p,pi)=>(
                       <tr key={p.id}>
                         <td>{fmtDate(p.date)}</td>
                         <td><span className={`badge ${p.type==="acquisto"?"badge-green":"badge-red"}`}>{p.type}</span></td>
@@ -794,8 +1042,10 @@ export default function IberSilosApp() {
               </div>
             );
           })()}
+}
 
-          {/* CONTABILIDAD */}
+// ── CONTABILIDAD TAB ─────────────────────────────────────────────────────────
+function ContabilidadTab({ data, persist, contabView, setContabView, mayorCuenta, setMayorCuenta, setAsientoModal, deleteAsiento, exportContabCSV }) {
           {tab==="contabilidad" && (() => {
             const asientos = data.asientos || [];
             const fixedAssets = data.fixedAssets || DEFAULT_ASSETS;
@@ -819,6 +1069,7 @@ export default function IberSilosApp() {
             });
             const mayorData = mayorSaldos[mayorCuenta]||{ debe:0, haber:0, movs:[] };
             let saldoProgr = 0;
+
             return (
               <div>
                 <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20 }}>
@@ -923,7 +1174,7 @@ export default function IberSilosApp() {
                     {cuentasUsadas.length===0 ? <div style={{ color:"#bbb",fontSize:13 }}>Registra asientos per vedere il balance.</div> :
                       <table>
                         <thead><tr><th>Cuenta</th><th>Nombre</th><th style={{ textAlign:"right" }}>Sumas Debe</th><th style={{ textAlign:"right" }}>Sumas Haber</th><th style={{ textAlign:"right" }}>Saldo D</th><th style={{ textAlign:"right" }}>Saldo H</th></tr></thead>
-                        <tbody>{cuentasUsadas.map(a=>{
+                        <tbody>{cuentasUsadas.map((a,ai)=>{
                           const d=mayorSaldos[a.code]?.debe||0, h=mayorSaldos[a.code]?.haber||0;
                           const sd=d>h?d-h:0, sa=h>d?h-d:0;
                           return (
@@ -1001,64 +1252,6 @@ export default function IberSilosApp() {
               </div>
             );
           })()}
-
-        </div>
-      </div>
-
-      {/* ── MODALS ── */}
-      {invoiceModal && <InvoiceModal inv={invoiceModal} onSave={saveInvoice} onClose={()=>setInvoiceModal(null)} />}
-      {movModal && <MovModal mov={movModal} onSave={saveMov} onClose={()=>setMovModal(null)} />}
-      {ibkrModal && (
-        <div className="modal-overlay" onClick={()=>setIbkrModal(null)}>
-          <div className="modal" onClick={e=>e.stopPropagation()}>
-            <div style={{ display:"flex",justifyContent:"space-between",marginBottom:20 }}>
-              <div className="modal-title">{ibkrModal.id?"Modifica operazione":"Nuova operazione"} IBKR SL</div>
-              <button onClick={()=>setIbkrModal(null)} style={{ background:"none",fontSize:20,color:"#999" }}>×</button>
-            </div>
-            <IbkrForm pos={ibkrModal} onSave={saveIbkr} onClose={()=>setIbkrModal(null)} />
-          </div>
-        </div>
-      )}
-      {reconcileModal && (
-        <div className="modal-overlay" onClick={()=>setReconcileModal(null)}>
-          <div className="modal" onClick={e=>e.stopPropagation()}>
-            <div style={{ display:"flex",justifyContent:"space-between",marginBottom:18 }}>
-              <div className="modal-title">Abbina movimento</div>
-              <button onClick={()=>setReconcileModal(null)} style={{ background:"none",fontSize:20,color:"#999" }}>×</button>
-            </div>
-            <div style={{ background:"#FFF5F5",border:"1.5px solid #ef9a9a",borderRadius:8,padding:14,marginBottom:18,fontSize:13 }}>
-              <div style={{ fontSize:10,fontWeight:700,letterSpacing:"0.1em",color:"#bbb",marginBottom:6 }}>MOVIMENTO</div>
-              <div style={{ fontWeight:600 }}>{fmtDate(reconcileModal.date)} — {reconcileModal.description}</div>
-              <div style={{ color:reconcileModal.type==="entrata"?"#28a745":"#E30613",fontWeight:700,marginTop:4 }}>{reconcileModal.type==="entrata"?"+":"-"}{fmt(reconcileModal.amount)}</div>
-            </div>
-            <div style={{ fontSize:10,fontWeight:700,letterSpacing:"0.1em",textTransform:"uppercase",color:"#bbb",marginBottom:10 }}>Fatture disponibili</div>
-            <div style={{ maxHeight:280,overflowY:"auto" }}>
-              {data.invoices.filter(i=>i.status!=="riconciliata"&&((reconcileModal.type==="entrata"&&i.type==="emessa")||(reconcileModal.type==="uscita"&&i.type==="ricevuta"))).map(inv=>(
-                <div key={inv.id} onClick={()=>manualReconcile(reconcileModal.id,inv.id)}
-                  style={{ padding:"12px 14px",borderRadius:8,border:"1.5px solid #E0E0E0",marginBottom:8,cursor:"pointer",transition:"all 0.15s" }}
-                  onMouseEnter={e=>e.currentTarget.style.borderColor="#E30613"}
-                  onMouseLeave={e=>e.currentTarget.style.borderColor="#E0E0E0"}>
-                  <div style={{ display:"flex",justifyContent:"space-between" }}>
-                    <span style={{ color:"#E30613",fontSize:13,fontWeight:700 }}>{inv.number} — {inv.type==="emessa"?inv.client:inv.supplier}</span>
-                    <span style={{ fontWeight:600 }}>{fmt(inv.grossAmount)}</span>
-                  </div>
-                  <div style={{ color:"#bbb",fontSize:11,marginTop:3 }}>Scad. {fmtDate(inv.dueDate)} · {inv.description}</div>
-                </div>
-              ))}
-            </div>
-            <button className="btn-ghost" style={{ marginTop:12,width:"100%" }} onClick={()=>setReconcileModal(null)}>Annulla</button>
-          </div>
-        </div>
-      )}
-      {asientoModal && <AsientoModal asiento={asientoModal} onSave={saveAsiento} onClose={()=>setAsientoModal(null)} />}
-
-      {toast && (
-        <div style={{ position:"fixed",bottom:24,right:24,background:toast.type==="err"?"#ffebee":toast.type==="warn"?"#fffde7":"#e8f5e9",border:`1.5px solid ${toast.type==="err"?"#ef9a9a":toast.type==="warn"?"#ffe082":"#a5d6a7"}`,color:toast.type==="err"?"#c62828":toast.type==="warn"?"#b8860b":"#2e7d32",padding:"12px 20px",borderRadius:10,fontSize:13,fontWeight:600,zIndex:200,boxShadow:"0 4px 20px rgba(0,0,0,0.1)" }}>
-          {toast.msg}
-        </div>
-      )}
-    </div>
-  );
 }
 
 // ── SUB-COMPONENTS ─────────────────────────────────────────────────────────────
