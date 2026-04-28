@@ -178,6 +178,109 @@ const IbersilosLogo = ({ height = 42 }) => (
 // ══════════════════════════════════════════════════════════════════════════════
 // MAIN APP
 // ══════════════════════════════════════════════════════════════════════════════
+// ── FATTURE APERTE MODAL ─────────────────────────────────────────────────────
+function FattureAperteModal({ invoices, onClose }) {
+  const emesseAperte = invoices.filter(i => i.type === "emessa" && i.status === "aperta");
+  const ricevuteAperte = invoices.filter(i => i.type === "ricevuta" && i.status === "aperta");
+  const totCrediti = emesseAperte.reduce((s, i) => s + (parseFloat(i.grossAmount) || 0), 0);
+  const totDebiti  = ricevuteAperte.reduce((s, i) => s + (parseFloat(i.grossAmount) || 0), 0);
+  const todayStr   = new Date().toISOString().split("T")[0];
+
+  const rowStyle = (inv) => ({
+    background: inv.dueDate && inv.dueDate < todayStr ? "#fff5f5" : "white",
+  });
+
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal" style={{ maxWidth:720 }} onClick={e => e.stopPropagation()}>
+        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:20 }}>
+          <div className="modal-title">📋 Facturas Abiertas</div>
+          <button onClick={onClose} style={{ background:"none", fontSize:20, color:"#999" }}>×</button>
+        </div>
+
+        {/* KPI summary */}
+        <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:12, marginBottom:20 }}>
+          <div style={{ background:"#e8f5e9", border:"1.5px solid #a5d6a7", borderRadius:10, padding:"12px 16px" }}>
+            <div style={{ fontSize:10, fontWeight:700, color:"#2e7d32", letterSpacing:"0.1em", textTransform:"uppercase" }}>Créditos activos</div>
+            <div style={{ fontSize:22, fontWeight:800, color:"#28a745", marginTop:4 }}>{fmt(totCrediti)}</div>
+            <div style={{ fontSize:11, color:"#999", marginTop:2 }}>{emesseAperte.length} facturas emitidas</div>
+          </div>
+          <div style={{ background:"#ffebee", border:"1.5px solid #ef9a9a", borderRadius:10, padding:"12px 16px" }}>
+            <div style={{ fontSize:10, fontWeight:700, color:"#c62828", letterSpacing:"0.1em", textTransform:"uppercase" }}>Débitos abiertos</div>
+            <div style={{ fontSize:22, fontWeight:800, color:"#E30613", marginTop:4 }}>{fmt(totDebiti)}</div>
+            <div style={{ fontSize:11, color:"#999", marginTop:2 }}>{ricevuteAperte.length} facturas recibidas</div>
+          </div>
+          <div style={{ background: totCrediti - totDebiti >= 0 ? "#e8f5e9" : "#ffebee", border:`1.5px solid ${totCrediti-totDebiti>=0?"#a5d6a7":"#ef9a9a"}`, borderRadius:10, padding:"12px 16px" }}>
+            <div style={{ fontSize:10, fontWeight:700, color:"#666", letterSpacing:"0.1em", textTransform:"uppercase" }}>Saldo neto</div>
+            <div style={{ fontSize:22, fontWeight:800, color: totCrediti-totDebiti >= 0 ? "#28a745" : "#E30613", marginTop:4 }}>{fmt(totCrediti - totDebiti)}</div>
+            <div style={{ fontSize:11, color:"#999", marginTop:2 }}>{emesseAperte.length + ricevuteAperte.length} en total abiertas</div>
+          </div>
+        </div>
+
+        {/* Emesse aperte */}
+        <div style={{ marginBottom:18 }}>
+          <div style={{ fontSize:10, fontWeight:700, letterSpacing:"1.5px", textTransform:"uppercase", color:"#28a745", marginBottom:8, display:"flex", alignItems:"center", gap:6 }}>
+            <span style={{ width:10, height:10, background:"#28a745", borderRadius:2, display:"inline-block" }} />
+            Facturas Emitidas — Por cobrar
+          </div>
+          {emesseAperte.length === 0 ? (
+            <div style={{ color:"#bbb", fontSize:13, padding:"10px 0" }}>Sin facturas emitidas abiertas ✅</div>
+          ) : (
+            <table>
+              <thead><tr><th>N°</th><th>Fecha</th><th>Venc.</th><th>Cliente</th><th style={{ textAlign:"right" }}>Total</th><th>Note</th></tr></thead>
+              <tbody>
+                {[...emesseAperte].sort((a,b) => (a.dueDate||a.date).localeCompare(b.dueDate||b.date)).map(inv => (
+                  <tr key={inv.id} style={rowStyle(inv)}>
+                    <td style={{ fontWeight:700, color:"#E30613" }}>{inv.number || "—"}</td>
+                    <td style={{ color:"#999", fontSize:12 }}>{fmtDate(inv.date)}</td>
+                    <td style={{ color: inv.dueDate && inv.dueDate < todayStr ? "#E30613" : "#999", fontWeight: inv.dueDate && inv.dueDate < todayStr ? 700 : 400, fontSize:12 }}>
+                      {fmtDate(inv.dueDate)} {inv.dueDate && inv.dueDate < todayStr && "⚠️"}
+                    </td>
+                    <td style={{ fontWeight:600 }}>{inv.client || "—"}</td>
+                    <td style={{ textAlign:"right", fontWeight:700, color:"#28a745" }}>{fmt(inv.grossAmount)}</td>
+                    <td style={{ fontSize:11, color:"#bbb", maxWidth:140, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{inv.description}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+
+        {/* Ricevute aperte */}
+        <div>
+          <div style={{ fontSize:10, fontWeight:700, letterSpacing:"1.5px", textTransform:"uppercase", color:"#E30613", marginBottom:8, display:"flex", alignItems:"center", gap:6 }}>
+            <span style={{ width:10, height:10, background:"#E30613", borderRadius:2, display:"inline-block" }} />
+            Facturas Recibidas — Por pagar
+          </div>
+          {ricevuteAperte.length === 0 ? (
+            <div style={{ color:"#bbb", fontSize:13, padding:"10px 0" }}>Sin facturas recibidas abiertas ✅</div>
+          ) : (
+            <table>
+              <thead><tr><th>N°</th><th>Fecha</th><th>Venc.</th><th>Proveedor</th><th style={{ textAlign:"right" }}>Total</th><th>Note</th></tr></thead>
+              <tbody>
+                {[...ricevuteAperte].sort((a,b) => (a.dueDate||a.date).localeCompare(b.dueDate||b.date)).map(inv => (
+                  <tr key={inv.id} style={rowStyle(inv)}>
+                    <td style={{ fontWeight:700, color:"#E30613" }}>{inv.number || "—"}</td>
+                    <td style={{ color:"#999", fontSize:12 }}>{fmtDate(inv.date)}</td>
+                    <td style={{ color: inv.dueDate && inv.dueDate < todayStr ? "#E30613" : "#999", fontWeight: inv.dueDate && inv.dueDate < todayStr ? 700 : 400, fontSize:12 }}>
+                      {fmtDate(inv.dueDate)} {inv.dueDate && inv.dueDate < todayStr && "⚠️"}
+                    </td>
+                    <td style={{ fontWeight:600 }}>{inv.supplier || "—"}</td>
+                    <td style={{ textAlign:"right", fontWeight:700, color:"#E30613" }}>{fmt(inv.grossAmount)}</td>
+                    <td style={{ fontSize:11, color:"#bbb", maxWidth:140, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{inv.description}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+
+        <button className="btn-ghost" style={{ width:"100%", marginTop:20 }} onClick={onClose}>Cerrar</button>
+      </div>
+    </div>
+  );
+}
+
 // ── AUTH ──────────────────────────────────────────────────────────────────────
 const USERS = { 'AC001': '1974' };
 
@@ -216,7 +319,7 @@ function LoginScreen({ onLogin }) {
             <rect x="101" y="33" width="35" height="10" rx="5" fill="#F5C800" transform="rotate(-28 101 33)" />
             <rect x="104" y="18" width="30" height="9" rx="4.5" fill="#E30613" transform="rotate(-28 104 18)" />
           </svg>
-          <p style={{ color:'#aaa', fontSize:11, margin:0, letterSpacing:'0.8px', textTransform:'uppercase' }}>Gestione Finanziaria · Reus, Tarragona</p>
+          <p style={{ color:'#aaa', fontSize:11, margin:0, letterSpacing:'0.8px', textTransform:'uppercase' }}>Gestión Financiera · Reus, Tarragona</p>
         </div>
 
         {/* Body */}
@@ -264,6 +367,7 @@ export default function IberSilosApp() {
   const [mayorCuenta, setMayorCuenta] = useState("572");
   const [ejercicio, setEjercicio] = useState("EF2");
   const [bimModal, setBimModal] = useState(false);
+  const [fattureAperteModal, setFattureAperteModal] = useState(false);
   const fileRef = useRef();
   const csvRef = useRef();
 
@@ -285,18 +389,18 @@ export default function IberSilosApp() {
     const invoices = exists ? data.invoices.map(i => i.id === final.id ? final : i) : [...data.invoices, final];
     persist({ ...data, invoices });
     setInvoiceModal(null);
-    showToast(exists ? "Fattura aggiornata" : "Fattura aggiunta");
+    showToast(exists ? "Factura actualizada" : "Factura añadida");
   };
-  const deleteInvoice = (id) => { if (!confirm("Eliminare?")) return; persist({ ...data, invoices: data.invoices.filter(i => i.id !== id) }); showToast("Eliminata", "warn"); };
+  const deleteInvoice = (id) => { if (!confirm("¿Eliminar?")) return; persist({ ...data, invoices: data.invoices.filter(i => i.id !== id) }); showToast("Eliminada", "warn"); };
 
   // ── MOVEMENT CRUD ──
   const saveMov = (mov) => {
     const final = { ...mov, id: mov.id || `mov-${Date.now()}` };
     const exists = data.movements.find(m => m.id === final.id);
     const movements = exists ? data.movements.map(m => m.id === final.id ? final : m) : [...data.movements, final];
-    persist({ ...data, movements }); setMovModal(null); showToast(exists ? "Aggiornato" : "Aggiunto");
+    persist({ ...data, movements }); setMovModal(null); showToast(exists ? "Actualizado" : "Añadido");
   };
-  const deleteMov = (id) => { if (!confirm("Eliminare?")) return; persist({ ...data, movements: data.movements.filter(m => m.id !== id) }); showToast("Eliminato", "warn"); };
+  const deleteMov = (id) => { if (!confirm("¿Eliminar?")) return; persist({ ...data, movements: data.movements.filter(m => m.id !== id) }); showToast("Eliminado", "warn"); };
 
   // ── IBKR CRUD ──
   const saveIbkr = (pos) => {
@@ -304,9 +408,9 @@ export default function IberSilosApp() {
     const final = { ...pos, totalEur: parseFloat((shares * price + fees).toFixed(2)), id: pos.id || `ibkr-${Date.now()}` };
     const exists = data.ibkrPositions?.find(p => p.id === final.id);
     const ibkrPositions = exists ? (data.ibkrPositions||[]).map(p => p.id===final.id?final:p) : [...(data.ibkrPositions||[]), final];
-    persist({ ...data, ibkrPositions }); setIbkrModal(null); showToast(exists ? "Aggiornato" : "Aggiunto");
+    persist({ ...data, ibkrPositions }); setIbkrModal(null); showToast(exists ? "Actualizado" : "Añadido");
   };
-  const deleteIbkr = (id) => { if (!confirm("Eliminare?")) return; persist({ ...data, ibkrPositions: (data.ibkrPositions||[]).filter(p => p.id!==id) }); showToast("Eliminato", "warn"); };
+  const deleteIbkr = (id) => { if (!confirm("¿Eliminar?")) return; persist({ ...data, ibkrPositions: (data.ibkrPositions||[]).filter(p => p.id!==id) }); showToast("Eliminado", "warn"); };
 
   // ── ASIENTO CRUD ──
   const saveAsiento = (asiento) => {
@@ -321,7 +425,7 @@ export default function IberSilosApp() {
     persist({ ...data, asientos: exists ? asientos.map(a => a.id===final.id?final:a) : [...asientos, final] });
     setAsientoModal(null); showToast(`Asiento ${numero} registrado `);
   };
-  const deleteAsiento = (id) => { if (!confirm("Eliminar?")) return; persist({ ...data, asientos: (data.asientos||[]).filter(a => a.id!==id) }); showToast("Eliminado", "warn"); };
+  const deleteAsiento = (id) => { if (!confirm("¿Eliminar?")) return; persist({ ...data, asientos: (data.asientos||[]).filter(a => a.id!==id) }); showToast("Eliminado", "warn"); };
 
   // ── RECONCILE ──
   const runAutoReconcile = () => {
@@ -345,9 +449,9 @@ export default function IberSilosApp() {
       const parsed = parseRevolutCSV(ev.target.result);
       const existing = new Set(data.movements.map(m => `${m.date}-${m.amount}-${m.description}`));
       const newMovs = parsed.filter(m => !existing.has(`${m.date}-${m.amount}-${m.description}`));
-      if (!newMovs.length) { showToast("Nessun nuovo movimento", "warn"); return; }
+      if (!newMovs.length) { showToast("Sin nuevos movimientos", "warn"); return; }
       persist({ ...data, movements: [...data.movements, ...newMovs] });
-      showToast(`Importati ${newMovs.length} movimenti`);
+      showToast(`Importados ${newMovs.length} movimientos`);
     };
     reader.readAsText(file); e.target.value = "";
   };
@@ -356,12 +460,12 @@ export default function IberSilosApp() {
   const exportJSON = () => {
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
     const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = `iber-silos-${today()}.json`; a.click();
-    showToast("Backup esportato");
+    showToast("Backup exportado");
   };
   const importJSON = (e) => {
     const file = e.target.files[0]; if (!file) return;
     const reader = new FileReader();
-    reader.onload = (ev) => { try { persist(JSON.parse(ev.target.result)); showToast("Dati importati"); } catch { showToast("File non valido", "err"); } };
+    reader.onload = (ev) => { try { persist(JSON.parse(ev.target.result)); showToast("Datos importados"); } catch { showToast("Archivo no válido", "err"); } };
     reader.readAsText(file); e.target.value = "";
   };
 
@@ -370,7 +474,7 @@ export default function IberSilosApp() {
     (data.asientos||[]).forEach(a => a.lineas.forEach(l => rows.push([a.numero,a.fecha,a.concepto,l.cuenta,ACC_MAP[l.cuenta]?.name||"",l.debe||"0",l.haber||"0"])));
     const csv = rows.map(r => r.map(v=>`"${String(v).replace(/"/g,'""')}"`).join(",")).join("\n");
     const blob = new Blob([csv],{type:"text/csv;charset=utf-8;"}); const a=document.createElement("a"); a.href=URL.createObjectURL(blob); a.download=`libro-diario-${today()}.csv`; a.click();
-    showToast("Libro Diario esportato");
+    showToast("Libro Diario exportado");
   };
 
   // ── DERIVED METRICS ──
@@ -400,7 +504,7 @@ export default function IberSilosApp() {
     <div style={{ display:"flex",alignItems:"center",justifyContent:"center",height:"100vh",background:"#F5F5F5",fontFamily:"'Segoe UI',Roboto,Arial,sans-serif" }}>
       <div style={{ textAlign:"center" }}>
         <IbersilosLogo height={60} />
-        <div style={{ marginTop:16,color:"#888",fontSize:13 }}>Caricamento...</div>
+        <div style={{ marginTop:16,color:"#888",fontSize:13 }}>Cargando...</div>
       </div>
     </div>
   );
@@ -484,7 +588,7 @@ export default function IberSilosApp() {
       <header style={{ background:"white", borderTop:"4px solid #F5C800", borderBottom:"4px solid #E30613", padding:"0 20px", height:60, display:"flex", alignItems:"center", gap:16, flexShrink:0, boxShadow:"0 2px 10px rgba(0,0,0,0.07)", zIndex:50 }}>
         <IbersilosLogo height={40} />
         <div style={{ width:1, height:28, background:"#E0E0E0" }} />
-        <div style={{ fontSize:10, fontWeight:700, letterSpacing:"2px", textTransform:"uppercase", color:"#bbb" }}>Gestione Finanziaria</div>
+        <div style={{ fontSize:10, fontWeight:700, letterSpacing:"2px", textTransform:"uppercase", color:"#bbb" }}>Gestión Financiera</div>
         <div style={{ flex:1 }} />
         <div style={{ display:"flex", gap:14, alignItems:"center" }}>
           <select value={ejercicio} onChange={e=>setEjercicio(e.target.value)} style={{ fontSize:11,padding:"5px 10px",border:"1.5px solid #E0E0E0",borderRadius:6,fontWeight:700,color:"#1A1A1A",background:"white",width:"auto" }}>
@@ -495,6 +599,14 @@ export default function IberSilosApp() {
           <KpiPill label="Créditos" value={fmt(metrics.creditiAperti)} color="#b8860b" />
         </div>
         <div style={{ display:"flex", gap:6 }}>
+          <button className="btn-ghost" onClick={() => setFattureAperteModal(true)} style={{ fontSize:11, position:"relative" }}>
+            📋 Abiertas
+            {(data.invoices.filter(i=>i.status==="aperta"&&i.type==="emessa").length + data.invoices.filter(i=>i.status==="aperta"&&i.type==="ricevuta").length) > 0 && (
+              <span style={{ position:"absolute",top:-5,right:-5,background:"#E30613",color:"white",borderRadius:"50%",width:16,height:16,fontSize:9,fontWeight:800,display:"flex",alignItems:"center",justifyContent:"center" }}>
+                {data.invoices.filter(i=>i.status==="aperta").length}
+              </span>
+            )}
+          </button>
           <button className="btn-ghost" onClick={exportJSON} style={{ fontSize:11 }}>↓ Backup</button>
           <button className="btn-ghost" onClick={() => fileRef.current.click()} style={{ fontSize:11 }}>↑ Importa</button>
           <input ref={fileRef} type="file" accept=".json" onChange={importJSON} style={{ display:"none" }} />
@@ -515,6 +627,55 @@ export default function IberSilosApp() {
               </button>
             ))}
           </div>
+          {/* ── IBKR PAC MINI — sempre visibile ── */}
+          <div style={{ padding:"14px 14px 10px", borderTop:"1px solid #F5F5F5", marginTop:"auto" }}>
+            <div style={{ fontSize:9, fontWeight:700, letterSpacing:"1.5px", textTransform:"uppercase", color:"#bbb", marginBottom:10 }}>PAC IBKR SL</div>
+            {(() => {
+              const positions = data.ibkrPositions || [];
+              const byTicker = {};
+              positions.forEach(p => {
+                if (!byTicker[p.ticker]) byTicker[p.ticker] = { shares:0, totalInvested:0 };
+                const shares = parseFloat(p.shares)||0, total = parseFloat(p.totalEur)||0;
+                if (p.type==="acquisto") { byTicker[p.ticker].shares+=shares; byTicker[p.ticker].totalInvested+=total; }
+                else { byTicker[p.ticker].shares-=shares; byTicker[p.ticker].totalInvested-=total; }
+              });
+              const totalInvested = Object.values(byTicker).reduce((s,t)=>s+t.totalInvested,0);
+              const lastOp = [...positions].reverse()[0];
+              const pacTarget = getPacAmount(today());
+              return (
+                <>
+                  <div style={{ background:"#FFF5F5", borderRadius:8, padding:"10px 12px", marginBottom:8 }}>
+                    <div style={{ fontSize:10, color:"#bbb", fontWeight:700, marginBottom:2 }}>TOTAL INVERTIDO</div>
+                    <div style={{ fontSize:18, fontWeight:800, color:"#E30613" }}>{fmt(totalInvested)}</div>
+                  </div>
+                  <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:6, marginBottom:8 }}>
+                    <div style={{ background:"#F5F5F5", borderRadius:6, padding:"7px 8px", textAlign:"center" }}>
+                      <div style={{ fontSize:9, color:"#bbb", fontWeight:700 }}>OBJETIVO/MES</div>
+                      <div style={{ fontSize:13, fontWeight:800, color:"#b8860b" }}>{fmt(pacTarget)}</div>
+                    </div>
+                    <div style={{ background:"#F5F5F5", borderRadius:6, padding:"7px 8px", textAlign:"center" }}>
+                      <div style={{ fontSize:9, color:"#bbb", fontWeight:700 }}>OPERACIONES</div>
+                      <div style={{ fontSize:13, fontWeight:800 }}>{positions.length}</div>
+                    </div>
+                  </div>
+                  {Object.entries(byTicker).filter(([,t])=>t.shares>0.0001).map(([ticker, t]) => (
+                    <div key={ticker} style={{ display:"flex", justifyContent:"space-between", fontSize:11, padding:"3px 0", borderBottom:"1px solid #F5F5F5" }}>
+                      <span style={{ fontWeight:700, color:"#E30613" }}>{ticker}</span>
+                      <span style={{ color:"#666" }}>{t.shares.toFixed(2)} sh</span>
+                    </div>
+                  ))}
+                  {lastOp && (
+                    <div style={{ marginTop:8, fontSize:10, color:"#bbb" }}>
+                      Último: {fmtDate(lastOp.date)} · {fmt(lastOp.totalEur)}
+                    </div>
+                  )}
+                  <button className="btn-ghost" style={{ fontSize:10, padding:"5px 8px", width:"100%", marginTop:8 }} onClick={() => setTab("ibkr")}>
+                    Ver IBKR →
+                  </button>
+                </>
+              );
+            })()}
+          </div>
         </aside>
 
         {/* ── CONTENT ── */}
@@ -527,10 +688,10 @@ export default function IberSilosApp() {
           {tab==="fatture" && (
             <div>
               <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:20 }}>
-                <div className="section-title">Registro Fatture</div>
+                <div className="section-title">Registro Facturas</div>
                 <div style={{ display:"flex", gap:8 }}>
-                  <button className="btn-red" onClick={() => setInvoiceModal({ id:null,type:"emessa",number:"",date:today(),dueDate:"",client:"",supplier:"",description:"",netAmount:"",ivaType:"21%",ivaAmount:0,grossAmount:0,status:"aperta",dropboxLink:"",notes:"" })}>+ Emessa</button>
-                  <button className="btn-ghost" onClick={() => setInvoiceModal({ id:null,type:"ricevuta",number:"",date:today(),dueDate:"",client:"",supplier:"",description:"",netAmount:"",ivaType:"RC (reverse charge)",ivaAmount:0,grossAmount:0,status:"aperta",dropboxLink:"",notes:"" })}>+ Ricevuta</button>
+                  <button className="btn-red" onClick={() => setInvoiceModal({ id:null,type:"emessa",number:"",date:today(),dueDate:"",client:"",supplier:"",description:"",netAmount:"",ivaType:"21%",ivaAmount:0,grossAmount:0,status:"aperta",dropboxLink:"",notes:"" })}>+ Emitida</button>
+                  <button className="btn-ghost" onClick={() => setInvoiceModal({ id:null,type:"ricevuta",number:"",date:today(),dueDate:"",client:"",supplier:"",description:"",netAmount:"",ivaType:"RC (reverse charge)",ivaAmount:0,grossAmount:0,status:"aperta",dropboxLink:"",notes:"" })}>+ Recibida</button>
                 </div>
               </div>
               <InvoiceTable invoices={data.invoices} onEdit={inv=>setInvoiceModal(inv)} onDelete={deleteInvoice} />
@@ -541,11 +702,11 @@ export default function IberSilosApp() {
           {tab==="movimenti" && (
             <div>
               <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:16 }}>
-                <div className="section-title">Movimenti Bancari</div>
+                <div className="section-title">Movimientos Bancarios</div>
                 <div style={{ display:"flex", gap:8 }}>
                   <button className="btn-ghost" onClick={() => csvRef.current.click()} style={{ fontSize:11 }}>↑ Import CSV Revolut</button>
                   <input ref={csvRef} type="file" accept=".csv" onChange={importCSV} style={{ display:"none" }} />
-                  <button className="btn-red" onClick={() => setMovModal({ id:null,date:today(),description:"",amount:"",type:"entrata",account:"Revolut Business",invoiceId:null,reconciled:false,notes:"" })}>+ Movimento</button>
+                  <button className="btn-red" onClick={() => setMovModal({ id:null,date:today(),description:"",amount:"",type:"entrata",account:"Revolut Business",invoiceId:null,reconciled:false,notes:"" })}>+ Movimiento</button>
                 </div>
               </div>
               <MovementTable movements={data.movements} invoices={data.invoices} onEdit={m=>setMovModal(m)} onDelete={deleteMov} onReconcile={m=>setReconcileModal(m)} />
@@ -561,19 +722,19 @@ export default function IberSilosApp() {
               </div>
               <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:14, marginBottom:20 }}>
                 <div className="kpi-card green"><div className="kpi-label">Fatture riconciliate</div><div className="kpi-value">{data.invoices.filter(i=>i.status==="riconciliata").length}<span style={{ fontSize:14,color:"#bbb",marginLeft:6 }}>/ {data.invoices.length}</span></div></div>
-                <div className="kpi-card blue"><div className="kpi-label">Movimenti abbinati</div><div className="kpi-value">{data.movements.filter(m=>m.reconciled).length}<span style={{ fontSize:14,color:"#bbb",marginLeft:6 }}>/ {data.movements.length}</span></div></div>
+                <div className="kpi-card blue"><div className="kpi-label">Movimientos asociados</div><div className="kpi-value">{data.movements.filter(m=>m.reconciled).length}<span style={{ fontSize:14,color:"#bbb",marginLeft:6 }}>/ {data.movements.length}</span></div></div>
               </div>
               <div className="card">
-                <div style={{ fontSize:10,fontWeight:700,letterSpacing:"1.5px",textTransform:"uppercase",color:"#bbb",marginBottom:12 }}>Movimenti da abbinare</div>
-                {data.movements.filter(m=>!m.reconciled).length===0 ? <div style={{ color:"#bbb",fontSize:13 }}>Tutti i movimenti sono abbinati </div> :
-                  <table><thead><tr><th>Data</th><th>Descrizione</th><th>Importo</th><th>Tipo</th><th></th></tr></thead>
+                <div style={{ fontSize:10,fontWeight:700,letterSpacing:"1.5px",textTransform:"uppercase",color:"#bbb",marginBottom:12 }}>Movimientos por asociar</div>
+                {data.movements.filter(m=>!m.reconciled).length===0 ? <div style={{ color:"#bbb",fontSize:13 }}>Todos los movimientos están asociados </div> :
+                  <table><thead><tr><th>Fecha</th><th>Descripción</th><th>Importe</th><th>Tipo</th><th></th></tr></thead>
                   <tbody>{data.movements.filter(m=>!m.reconciled).map(m=>(
                     <tr key={m.id}>
                       <td>{fmtDate(m.date)}</td>
                       <td style={{ maxWidth:280,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap" }}>{m.description}</td>
                       <td style={{ color:m.type==="entrata"?"#28a745":"#E30613",fontWeight:600 }}>{m.type==="entrata"?"+":"-"}{fmt(m.amount)}</td>
                       <td><span className={`badge ${m.type==="entrata"?"badge-green":"badge-red"}`}>{m.type}</span></td>
-                      <td><button className="btn-ghost" style={{ fontSize:11,padding:"4px 10px" }} onClick={()=>setReconcileModal(m)}>Abbina</button></td>
+                      <td><button className="btn-ghost" style={{ fontSize:11,padding:"4px 10px" }} onClick={()=>setReconcileModal(m)}>Asociar</button></td>
                     </tr>
                   ))}</tbody></table>
                 }
@@ -619,11 +780,12 @@ export default function IberSilosApp() {
       {/* ── MODALS ── */}
       {invoiceModal && <InvoiceModal inv={invoiceModal} onSave={saveInvoice} onClose={()=>setInvoiceModal(null)} />}
       {movModal && <MovModal mov={movModal} onSave={saveMov} onClose={()=>setMovModal(null)} />}
+      {fattureAperteModal && <FattureAperteModal invoices={data.invoices} onClose={()=>setFattureAperteModal(false)} />}
       {ibkrModal && (
         <div className="modal-overlay" onClick={()=>setIbkrModal(null)}>
           <div className="modal" onClick={e=>e.stopPropagation()}>
             <div style={{ display:"flex",justifyContent:"space-between",marginBottom:20 }}>
-              <div className="modal-title">{ibkrModal.id?"Modifica operazione":"Nuova operazione"} IBKR SL</div>
+              <div className="modal-title">{ibkrModal.id?"Modificar operación":"Nueva operación"} IBKR SL</div>
               <button onClick={()=>setIbkrModal(null)} style={{ background:"none",fontSize:20,color:"#999" }}>×</button>
             </div>
             <IbkrForm pos={ibkrModal} onSave={saveIbkr} onClose={()=>setIbkrModal(null)} />
@@ -642,7 +804,7 @@ export default function IberSilosApp() {
               <div style={{ fontWeight:600 }}>{fmtDate(reconcileModal.date)} — {reconcileModal.description}</div>
               <div style={{ color:reconcileModal.type==="entrata"?"#28a745":"#E30613",fontWeight:700,marginTop:4 }}>{reconcileModal.type==="entrata"?"+":"-"}{fmt(reconcileModal.amount)}</div>
             </div>
-            <div style={{ fontSize:10,fontWeight:700,letterSpacing:"0.1em",textTransform:"uppercase",color:"#bbb",marginBottom:10 }}>Fatture disponibili</div>
+            <div style={{ fontSize:10,fontWeight:700,letterSpacing:"0.1em",textTransform:"uppercase",color:"#bbb",marginBottom:10 }}>Facturas disponibles</div>
             <div style={{ maxHeight:280,overflowY:"auto" }}>
               {data.invoices.filter(i=>i.status!=="riconciliata"&&((reconcileModal.type==="entrata"&&i.type==="emessa")||(reconcileModal.type==="uscita"&&i.type==="ricevuta"))).map(inv=>(
                 <div key={inv.id} onClick={()=>manualReconcile(reconcileModal.id,inv.id)}
@@ -657,7 +819,7 @@ export default function IberSilosApp() {
                 </div>
               ))}
             </div>
-            <button className="btn-ghost" style={{ marginTop:12,width:"100%" }} onClick={()=>setReconcileModal(null)}>Annulla</button>
+            <button className="btn-ghost" style={{ marginTop:12,width:"100%" }} onClick={()=>setReconcileModal(null)}>Cancelar</button>
           </div>
         </div>
       )}
@@ -672,7 +834,7 @@ export default function IberSilosApp() {
               <button onClick={()=>setBimModal(false)} style={{ background:"none",fontSize:20,color:"#999" }}>×</button>
             </div>
             <div style={{ background:"#fffde7",border:"1.5px solid #ffe082",borderRadius:8,padding:"10px 14px",marginBottom:18,fontSize:12,color:"#b8860b" }}>
-              Pratica trimestrale diretta (senza intermediario) · Scadenza: <strong>30/09 anno successivo</strong> · Soglia: <strong>IVA &gt; €{IVA_ESTERA_SOGLIA}/trimestre/paese</strong>
+              Pratica trimestrale diretta (senza intermediario) · Vencimiento: <strong>30/09 año siguiente</strong> · Soglia: <strong>IVA &gt; €{IVA_ESTERA_SOGLIA}/trimestre/país</strong>
             </div>
             {[
               { paese:"🇮🇹 Italia",  codice:"IT", aliquota:IVA_RATES.IT,
@@ -704,7 +866,7 @@ export default function IberSilosApp() {
                 <div style={{ fontSize:11,color:"#3949ab",background:"#f0f4ff",borderRadius:6,padding:"8px 10px",lineHeight:1.5 }}><strong>Procedura:</strong> {p.procedura}</div>
               </div>
             ))}
-            <button className="btn-ghost" style={{ width:"100%",marginTop:4 }} onClick={()=>setBimModal(false)}>Chiudi</button>
+            <button className="btn-ghost" style={{ width:"100%",marginTop:4 }} onClick={()=>setBimModal(false)}>Cerrar</button>
           </div>
         </div>
       )}
@@ -888,7 +1050,7 @@ function DashboardTab({ data, metrics, forecast, ejercicio, EJERCICIOS, bimModal
                     </div>
                     <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",padding:"10px 14px",background:"#f8fffe",borderRadius:8,border:"1.5px solid #a5d6a7" }}>
                       <div>
-                        <span style={{ fontSize:12,fontWeight:700 }}>Totale recuperabile: </span>
+                        <span style={{ fontSize:12,fontWeight:700 }}>Total recuperable: </span>
                         <span style={{ fontSize:16,fontWeight:800,color:"#28a745" }}>{fmt(totAnnuo.tot)}</span>
                         {totAnnuo.tot>0&&<div style={{ display:"flex",flexWrap:"wrap",gap:4,marginTop:6 }}>
                         {PAESI.filter(p=>totAnnuo[p]>0).map(p=>(
@@ -923,8 +1085,8 @@ function DashboardTab({ data, metrics, forecast, ejercicio, EJERCICIOS, bimModal
                   <div className="card" style={{ marginBottom:16 }}>
                     <div style={{ fontSize:10,fontWeight:700,letterSpacing:"1.5px",textTransform:"uppercase",color:"#bbb",marginBottom:16 }}>Fatturato mensile — Attivo vs Passivo</div>
                     <div style={{ display:"flex",gap:16,marginBottom:10,fontSize:11 }}>
-                      <span style={{ display:"flex",alignItems:"center",gap:5 }}><span style={{ width:12,height:12,background:"#E30613",borderRadius:2,display:"inline-block" }}/> Fatture emesse</span>
-                      <span style={{ display:"flex",alignItems:"center",gap:5 }}><span style={{ width:12,height:12,background:"#3949ab",borderRadius:2,display:"inline-block" }}/> Fatture ricevute</span>
+                      <span style={{ display:"flex",alignItems:"center",gap:5 }}><span style={{ width:12,height:12,background:"#E30613",borderRadius:2,display:"inline-block" }}/> Facturas emitidas</span>
+                      <span style={{ display:"flex",alignItems:"center",gap:5 }}><span style={{ width:12,height:12,background:"#3949ab",borderRadius:2,display:"inline-block" }}/> Facturas recibidas</span>
                       <span style={{ display:"flex",alignItems:"center",gap:5 }}><span style={{ width:12,height:12,background:"#28a745",borderRadius:2,display:"inline-block" }}/> Margine</span>
                     </div>
                     <ResponsiveContainer width="100%" height={220}>
@@ -934,7 +1096,7 @@ function DashboardTab({ data, metrics, forecast, ejercicio, EJERCICIOS, bimModal
                         <YAxis tick={{ fontSize:10,fill:"#bbb" }} tickFormatter={v=>v>=1000?`${(v/1000).toFixed(0)}k`:`${v}`} axisLine={false} tickLine={false} />
                         <Tooltip
                           contentStyle={{ background:"white",border:"1.5px solid #E0E0E0",borderRadius:8,fontSize:12 }}
-                          formatter={(v,n)=>[fmt(v), n==="attive"?"Emesse":n==="passive"?"Ricevute":"Margine"]}
+                          formatter={(v,n)=>[fmt(v), n==="attive"?"Emitidas":n==="passive"?"Recibidas":"Margen"]}
                         />
                         <Bar dataKey="attive"  fill="#E30613" radius={[4,4,0,0]} />
                         <Bar dataKey="passive" fill="#3949ab" radius={[4,4,0,0]} />
@@ -946,8 +1108,8 @@ function DashboardTab({ data, metrics, forecast, ejercicio, EJERCICIOS, bimModal
               })()}
 
                 <div style={{ fontSize:10, fontWeight:700, letterSpacing:"1.5px", textTransform:"uppercase", color:"#bbb", marginBottom:12 }}>Últimas facturas</div>
-                {data.invoices.length===0 ? <div style={{ color:"#bbb", fontSize:13 }}>Nessuna fattura ancora.</div> :
-                  <table><thead><tr><th>N°</th><th>Data</th><th>Tipo</th><th>Controparte</th><th>Imponibile</th><th>Stato</th></tr></thead>
+                {data.invoices.length===0 ? <div style={{ color:"#bbb", fontSize:13 }}>Sin facturas todavía.</div> :
+                  <table><thead><tr><th>N°</th><th>Fecha</th><th>Tipo</th><th>Contraparte</th><th>Base imp.</th><th>Stato</th></tr></thead>
                   <tbody>{data.invoices.slice(-8).reverse().map(inv=>(
                     <tr key={inv.id}>
                       <td style={{ fontWeight:700, color:"#E30613" }}>{inv.number||"—"}</td>
@@ -966,7 +1128,6 @@ function DashboardTab({ data, metrics, forecast, ejercicio, EJERCICIOS, bimModal
 
 // ── IBKR TAB ─────────────────────────────────────────────────────────────────
 function IbkrTab({ data, setIbkrModal, deleteIbkr }) {
-          {tab==="ibkr" && (() => {
             const positions = data.ibkrPositions || [];
             const byTicker = {};
             positions.forEach(p => {
@@ -991,11 +1152,11 @@ function IbkrTab({ data, setIbkrModal, deleteIbkr }) {
                   <div className="kpi-card"><div className="kpi-label">Totale investito</div><div className="kpi-value" style={{ color:"#E30613" }}>{fmt(totalInvested)}</div></div>
                   <div className="kpi-card gray"><div className="kpi-label">Ticker</div><div className="kpi-value">{tickers.length}</div></div>
                   <div className="kpi-card gray"><div className="kpi-label">Operazioni</div><div className="kpi-value">{positions.length}</div></div>
-                  <div className="kpi-card yellow"><div className="kpi-label">PAC target/mese</div><div className="kpi-value" style={{ color:"#b8860b" }}>{fmt(getPacAmount(today()))}</div><div style={{ fontSize:10,color:"#bbb",marginTop:2 }}>→ €500 da lug 2026</div></div>
+                  <div className="kpi-card yellow"><div className="kpi-label">PAC target/mese</div><div className="kpi-value" style={{ color:"#b8860b" }}>{fmt(getPacAmount(today()))}</div><div style={{ fontSize:10,color:"#bbb",marginTop:2 }}>→ €500 desde jul 2026</div></div>
                 </div>
                 <div className="card" style={{ marginBottom:16 }}>
-                  <div style={{ fontSize:10,fontWeight:700,letterSpacing:"1.5px",textTransform:"uppercase",color:"#bbb",marginBottom:12 }}>Posizioni aperte</div>
-                  {tickers.length===0 ? <div style={{ color:"#bbb",fontSize:13 }}>Nessuna posizione. Aggiungi la prima operazione.</div> :
+                  <div style={{ fontSize:10,fontWeight:700,letterSpacing:"1.5px",textTransform:"uppercase",color:"#bbb",marginBottom:12 }}>Posiciones abiertas</div>
+                  {tickers.length===0 ? <div style={{ color:"#bbb",fontSize:13 }}>Sin posiciones. Añade la primera operación.</div> :
                     <table><thead><tr><th>Ticker</th><th style={{ textAlign:"right" }}>Shares</th><th style={{ textAlign:"right" }}>PMC</th><th style={{ textAlign:"right" }}>Valore PMC</th><th style={{ textAlign:"right" }}>% portafoglio</th></tr></thead>
                     <tbody>{tickers.map(t => {
                       const pmc = t.shares>0 ? t.totalInvested/t.shares : 0;
@@ -1025,7 +1186,7 @@ function IbkrTab({ data, setIbkrModal, deleteIbkr }) {
                         <CartesianGrid strokeDasharray="3 3" stroke="#F5F5F5" />
                         <XAxis dataKey="month" tick={{ fontSize:10,fill:"#bbb" }} />
                         <YAxis tick={{ fontSize:10,fill:"#bbb" }} tickFormatter={v=>`${v}€`} />
-                        <Tooltip contentStyle={{ background:"white",border:"1.5px solid #E0E0E0",borderRadius:8,fontSize:12 }} formatter={(v,n)=>[fmt(v),n==="investito"?"Investito":"Target"]} />
+                        <Tooltip contentStyle={{ background:"white",border:"1.5px solid #E0E0E0",borderRadius:8,fontSize:12 }} formatter={(v,n)=>[fmt(v),n==="investito"?"Invertido":"Objetivo"]} />
                         <Bar dataKey="investito" fill="#E30613" radius={[4,4,0,0]} />
                         <Bar dataKey="target" fill="#F5F5F5" radius={[4,4,0,0]} />
                       </BarChart>
@@ -1033,9 +1194,9 @@ function IbkrTab({ data, setIbkrModal, deleteIbkr }) {
                   </div>
                 )}
                 <div className="card">
-                  <div style={{ fontSize:10,fontWeight:700,letterSpacing:"1.5px",textTransform:"uppercase",color:"#bbb",marginBottom:12 }}>Log operazioni</div>
-                  {positions.length===0 ? <div style={{ color:"#bbb",fontSize:13 }}>Nessuna operazione.</div> :
-                    <table><thead><tr><th>Data</th><th>Tipo</th><th>Ticker</th><th style={{ textAlign:"right" }}>Shares</th><th style={{ textAlign:"right" }}>Prezzo</th><th style={{ textAlign:"right" }}>Commissioni</th><th style={{ textAlign:"right" }}>Totale</th><th></th></tr></thead>
+                  <div style={{ fontSize:10,fontWeight:700,letterSpacing:"1.5px",textTransform:"uppercase",color:"#bbb",marginBottom:12 }}>Registro operaciones</div>
+                  {positions.length===0 ? <div style={{ color:"#bbb",fontSize:13 }}>Sin operaciones.</div> :
+                    <table><thead><tr><th>Fecha</th><th>Tipo</th><th>Ticker</th><th style={{ textAlign:"right" }}>Shares</th><th style={{ textAlign:"right" }}>Prezzo</th><th style={{ textAlign:"right" }}>Commissioni</th><th style={{ textAlign:"right" }}>Totale</th><th></th></tr></thead>
                     <tbody>{[...positions].reverse().map((p,pi)=>(
                       <tr key={p.id}>
                         <td>{fmtDate(p.date)}</td>
@@ -1055,12 +1216,10 @@ function IbkrTab({ data, setIbkrModal, deleteIbkr }) {
                 </div>
               </div>
             );
-          })()}
 }
 
 // ── CONTABILIDAD TAB ─────────────────────────────────────────────────────────
 function ContabilidadTab({ data, persist, contabView, setContabView, mayorCuenta, setMayorCuenta, setAsientoModal, deleteAsiento, exportContabCSV }) {
-          {tab==="contabilidad" && (() => {
             const asientos = data.asientos || [];
             const fixedAssets = data.fixedAssets || DEFAULT_ASSETS;
             const currentYear = new Date().getFullYear();
@@ -1105,7 +1264,7 @@ function ContabilidadTab({ data, persist, contabView, setContabView, mayorCuenta
                       <span style={{ fontSize:10,fontWeight:700,letterSpacing:"1.5px",textTransform:"uppercase",color:"#bbb" }}>{asientos.length} asientos</span>
                       {asientos.length>0 && <span className={`badge ${cuadra?"badge-green":"badge-red"}`}>{cuadra?" Cuadra":" No cuadra"}</span>}
                     </div>
-                    {asientos.length===0 ? <div style={{ color:"#bbb",fontSize:13 }}>Nessun asiento. Ogni asiento deve bilanciare: ∑Debe = ∑Haber</div> :
+                    {asientos.length===0 ? <div style={{ color:"#bbb",fontSize:13 }}>Sin asientos. Ogni asiento deve bilanciare: ∑Debe = ∑Haber</div> :
                       <div style={{ overflowX:"auto" }}>
                         <table>
                           <thead><tr><th>N°</th><th>Fecha</th><th>Concepto</th><th>Cuenta</th><th>Nombre</th><th style={{ textAlign:"right" }}>Debe</th><th style={{ textAlign:"right" }}>Haber</th><th></th></tr></thead>
@@ -1151,7 +1310,7 @@ function ContabilidadTab({ data, persist, contabView, setContabView, mayorCuenta
                           <div style={{ fontWeight:800,fontSize:20,color:mayorData.debe>=mayorData.haber?"#3949ab":"#E30613" }}>{fmt(Math.abs(mayorData.debe-mayorData.haber))} <span style={{ fontSize:11,color:"#bbb" }}>{mayorData.debe>=mayorData.haber?"D":"H"}</span></div>
                         </div>
                       </div>
-                      {mayorData.movs.length===0 ? <div style={{ color:"#bbb",fontSize:13 }}>Nessun movimento.</div> :
+                      {mayorData.movs.length===0 ? <div style={{ color:"#bbb",fontSize:13 }}>Sin movimento.</div> :
                         <table>
                           <thead><tr><th>N°</th><th>Fecha</th><th>Concepto</th><th style={{ textAlign:"right" }}>Debe</th><th style={{ textAlign:"right" }}>Haber</th><th style={{ textAlign:"right" }}>Saldo progr.</th></tr></thead>
                           <tbody>{mayorData.movs.sort((a,b)=>a.fecha.localeCompare(b.fecha)).map((m,i)=>{
@@ -1265,7 +1424,6 @@ function ContabilidadTab({ data, persist, contabView, setContabView, mayorCuenta
                 )}
               </div>
             );
-          })()}
 }
 
 // ── SUB-COMPONENTS ─────────────────────────────────────────────────────────────
@@ -1295,10 +1453,10 @@ function InvoiceTable({ invoices, onEdit, onDelete }) {
         ))}
         <span style={{ marginLeft:"auto",color:"#bbb",fontSize:11,fontWeight:600 }}>{filtered.length} fatture</span>
       </div>
-      {filtered.length===0 ? <div style={{ color:"#bbb",fontSize:13 }}>Nessuna fattura.</div> :
+      {filtered.length===0 ? <div style={{ color:"#bbb",fontSize:13 }}>Sin facturas.</div> :
         <div style={{ overflowX:"auto" }}>
           <table>
-            <thead><tr><th>N°</th><th>Data</th><th>Scad.</th><th>Tipo</th><th>Controparte</th><th>Descrizione</th><th style={{ textAlign:"right" }}>Imponibile</th><th>IVA</th><th style={{ textAlign:"right" }}>Lordo</th><th>Stato</th><th></th></tr></thead>
+            <thead><tr><th>N°</th><th>Fecha</th><th>Venc.</th><th>Tipo</th><th>Contraparte</th><th>Descripción</th><th style={{ textAlign:"right" }}>Base imp.</th><th>IVA</th><th style={{ textAlign:"right" }}>Total</th><th>Stato</th><th></th></tr></thead>
             <tbody>{[...filtered].reverse().map(inv=>(
               <tr key={inv.id}>
                 <td style={{ color:"#E30613",fontWeight:700,whiteSpace:"nowrap" }}>{inv.number||"—"}</td>
@@ -1330,10 +1488,10 @@ function MovementTable({ movements, invoices, onEdit, onDelete, onReconcile }) {
   return (
     <div className="card">
       <span style={{ color:"#bbb",fontSize:11,fontWeight:600,display:"block",marginBottom:12 }}>{movements.length} movimenti · {movements.filter(m=>m.reconciled).length} riconciliati</span>
-      {movements.length===0 ? <div style={{ color:"#bbb",fontSize:13 }}>Nessun movimento. Importa CSV Revolut o aggiungi manualmente.</div> :
+      {movements.length===0 ? <div style={{ color:"#bbb",fontSize:13 }}>Sin movimientos. Importa CSV Revolut o añade manualmente.</div> :
         <div style={{ overflowX:"auto" }}>
           <table>
-            <thead><tr><th>Data</th><th>Descrizione</th><th>Importo</th><th>Conto</th><th>Fattura abbinata</th><th>Stato</th><th></th></tr></thead>
+            <thead><tr><th>Fecha</th><th>Descripción</th><th>Importe</th><th>Cuenta</th><th>Factura asociada</th><th>Stato</th><th></th></tr></thead>
             <tbody>{[...movements].reverse().map(m=>{
               const linked = m.invoiceId ? invMap[m.invoiceId] : null;
               return (
@@ -1343,7 +1501,7 @@ function MovementTable({ movements, invoices, onEdit, onDelete, onReconcile }) {
                   <td style={{ color:m.type==="entrata"?"#28a745":"#E30613",fontWeight:700,whiteSpace:"nowrap" }}>{m.type==="entrata"?"+":"-"}{fmt(m.amount)}</td>
                   <td style={{ color:"#bbb",fontSize:11 }}>{m.account}</td>
                   <td style={{ fontSize:11 }}>{linked?<span style={{ color:"#3949ab",fontWeight:600 }}>{linked.number} — {linked.type==="emessa"?linked.client:linked.supplier}</span>:<span style={{ color:"#E0E0E0" }}>—</span>}</td>
-                  <td>{m.reconciled?<span className="badge badge-green">abbinato</span>:<span className="badge badge-gray">libero</span>}</td>
+                  <td>{m.reconciled?<span className="badge badge-green">asociado</span>:<span className="badge badge-gray">libre</span>}</td>
                   <td style={{ whiteSpace:"nowrap" }}>
                     {!m.reconciled && <button className="btn-ghost" style={{ fontSize:11,marginRight:4,padding:"4px 8px" }} onClick={()=>onReconcile(m)}></button>}
                     <button className="btn-ghost" style={{ fontSize:11,marginRight:4,padding:"4px 8px" }} onClick={()=>onEdit(m)}></button>
@@ -1384,8 +1542,8 @@ function InvoiceModal({ inv, onSave, onClose }) {
           <button className={`tab-btn ${form.type==="ricevuta"?"active":""}`} onClick={()=>set("type","ricevuta")} style={{ flex:1 }}>Ricevuta</button>
         </div></div>
         <div className="form-row form-row-2">
-          <div><label>N° Fattura</label><input value={form.number} onChange={e=>set("number",e.target.value)} placeholder="IBS-5816/2026/SE" /></div>
-          <div><label>Data</label><input type="date" value={form.date} onChange={e=>set("date",e.target.value)} /></div>
+          <div><label>N° Factura</label><input value={form.number} onChange={e=>set("number",e.target.value)} placeholder="IBS-5816/2026/SE" /></div>
+          <div><label>Fecha</label><input type="date" value={form.date} onChange={e=>set("date",e.target.value)} /></div>
         </div>
         <div className="form-row form-row-2">
           <div><label>Scadenza</label><input type="date" value={form.dueDate} onChange={e=>set("dueDate",e.target.value)} /></div>
@@ -1393,11 +1551,11 @@ function InvoiceModal({ inv, onSave, onClose }) {
         </div>
         {form.type==="emessa"
           ? <div className="form-row"><label>Cliente</label><select value={form.client} onChange={e=>set("client",e.target.value)}><option value="">Seleziona...</option>{CLIENTS.map(c=><option key={c}>{c}</option>)}</select></div>
-          : <div className="form-row"><label>Fornitore</label><select value={form.supplier} onChange={e=>set("supplier",e.target.value)}><option value="">Seleziona...</option>{SUPPLIERS.map(s=><option key={s}>{s}</option>)}</select></div>
+          : <div className="form-row"><label>Proveedor</label><select value={form.supplier} onChange={e=>set("supplier",e.target.value)}><option value="">Seleziona...</option>{SUPPLIERS.map(s=><option key={s}>{s}</option>)}</select></div>
         }
-        <div className="form-row"><label>Descrizione</label><input value={form.description} onChange={e=>set("description",e.target.value)} placeholder="Servizi di trasporto — ordine..." /></div>
+        <div className="form-row"><label>Descripción</label><input value={form.description} onChange={e=>set("description",e.target.value)} placeholder="Servicios de transporte — ordine..." /></div>
         <div className="form-row form-row-2">
-          <div><label>Imponibile (€)</label><input type="number" step="0.01" value={form.netAmount} onChange={e=>set("netAmount",e.target.value)} /></div>
+          <div><label>Base imponible (€)</label><input type="number" step="0.01" value={form.netAmount} onChange={e=>set("netAmount",e.target.value)} /></div>
           <div><label>Tipo IVA</label><select value={form.ivaType} onChange={e=>set("ivaType",e.target.value)}>{Object.keys(IVA_TYPES_KEYS).map(k=><option key={k}>{k}</option>)}</select></div>
         </div>
         <div className="form-row form-row-2">
@@ -1405,10 +1563,10 @@ function InvoiceModal({ inv, onSave, onClose }) {
           <div><label>Totale lordo (€)</label><input readOnly value={form.grossAmount||0} style={{ color:"#E30613",fontWeight:700 }} /></div>
         </div>
         <div className="form-row"><label>Link Dropbox documento</label><input value={form.dropboxLink} onChange={e=>set("dropboxLink",e.target.value)} placeholder="https://www.dropbox.com/..." /></div>
-        <div className="form-row"><label>Note</label><textarea rows={2} value={form.notes} onChange={e=>set("notes",e.target.value)} /></div>
+        <div className="form-row"><label>Notas</label><textarea rows={2} value={form.notes} onChange={e=>set("notes",e.target.value)} /></div>
         <div style={{ display:"flex",gap:8,marginTop:8 }}>
-          <button className="btn-red" style={{ flex:1 }} onClick={()=>onSave(form)}>Salva</button>
-          <button className="btn-ghost" onClick={onClose}>Annulla</button>
+          <button className="btn-red" style={{ flex:1 }} onClick={()=>onSave(form)}>Guardar</button>
+          <button className="btn-ghost" onClick={onClose}>Cancelar</button>
         </div>
       </div>
     </div>
@@ -1422,22 +1580,22 @@ function MovModal({ mov, onSave, onClose }) {
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal" onClick={e=>e.stopPropagation()}>
         <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20 }}>
-          <div className="modal-title">{form.id?"Modifica movimento":"Nuovo movimento"}</div>
+          <div className="modal-title">{form.id?"Editar movimiento":"Nuevo movimiento"}</div>
           <button onClick={onClose} style={{ background:"none",fontSize:20,color:"#999" }}>×</button>
         </div>
         <div className="form-row form-row-2">
-          <div><label>Data</label><input type="date" value={form.date} onChange={e=>set("date",e.target.value)} /></div>
-          <div><label>Conto</label><select value={form.account} onChange={e=>set("account",e.target.value)}>{["Revolut Business","BBVA","Contanti"].map(a=><option key={a}>{a}</option>)}</select></div>
+          <div><label>Fecha</label><input type="date" value={form.date} onChange={e=>set("date",e.target.value)} /></div>
+          <div><label>Cuenta</label><select value={form.account} onChange={e=>set("account",e.target.value)}>{["Revolut Business","BBVA","Contanti"].map(a=><option key={a}>{a}</option>)}</select></div>
         </div>
-        <div className="form-row"><label>Descrizione</label><input value={form.description} onChange={e=>set("description",e.target.value)} /></div>
+        <div className="form-row"><label>Descripción</label><input value={form.description} onChange={e=>set("description",e.target.value)} /></div>
         <div className="form-row form-row-2">
           <div><label>Importo (€)</label><input type="number" step="0.01" value={form.amount} onChange={e=>set("amount",e.target.value)} /></div>
           <div><label>Tipo</label><select value={form.type} onChange={e=>set("type",e.target.value)}><option>entrata</option><option>uscita</option></select></div>
         </div>
-        <div className="form-row"><label>Note</label><textarea rows={2} value={form.notes} onChange={e=>set("notes",e.target.value)} /></div>
+        <div className="form-row"><label>Notas</label><textarea rows={2} value={form.notes} onChange={e=>set("notes",e.target.value)} /></div>
         <div style={{ display:"flex",gap:8,marginTop:8 }}>
-          <button className="btn-red" style={{ flex:1 }} onClick={()=>onSave(form)}>Salva</button>
-          <button className="btn-ghost" onClick={onClose}>Annulla</button>
+          <button className="btn-red" style={{ flex:1 }} onClick={()=>onSave(form)}>Guardar</button>
+          <button className="btn-ghost" onClick={onClose}>Cancelar</button>
         </div>
       </div>
     </div>
@@ -1455,7 +1613,7 @@ function IbkrForm({ pos, onSave, onClose }) {
   return (
     <>
       <div className="form-row form-row-2">
-        <div><label>Data</label><input type="date" value={form.date} onChange={e=>set("date",e.target.value)} /></div>
+        <div><label>Fecha</label><input type="date" value={form.date} onChange={e=>set("date",e.target.value)} /></div>
         <div><label>Tipo</label><select value={form.type} onChange={e=>set("type",e.target.value)}><option value="acquisto">Acquisto</option><option value="vendita">Vendita</option></select></div>
       </div>
       <div className="form-row form-row-2">
@@ -1470,10 +1628,10 @@ function IbkrForm({ pos, onSave, onClose }) {
       <div style={{ background:"#FFF5F5",border:"1.5px solid #ef9a9a",borderRadius:8,padding:"10px 14px",marginBottom:14,fontSize:11,color:"#E30613" }}>
          PAC target: <span style={{ fontWeight:700 }}>{getPacAmount(form.date)}/mese</span> · Classificazione: <span style={{ color:"#666" }}>Inversiones financieras a largo plazo</span>
       </div>
-      <div className="form-row"><label>Note</label><textarea rows={2} value={form.notes} onChange={e=>set("notes",e.target.value)} placeholder="Es: PAC aprile 2026 — VWCE" /></div>
+      <div className="form-row"><label>Notas</label><textarea rows={2} value={form.notes} onChange={e=>set("notes",e.target.value)} placeholder="Es: PAC aprile 2026 — VWCE" /></div>
       <div style={{ display:"flex",gap:8,marginTop:8 }}>
-        <button className="btn-red" style={{ flex:1 }} onClick={()=>onSave(form)}>Salva</button>
-        <button className="btn-ghost" onClick={onClose}>Annulla</button>
+        <button className="btn-red" style={{ flex:1 }} onClick={()=>onSave(form)}>Guardar</button>
+        <button className="btn-ghost" onClick={onClose}>Cancelar</button>
       </div>
     </>
   );
@@ -1495,7 +1653,7 @@ function AsientoModal({ asiento, onSave, onClose }) {
       <div className="modal" style={{ maxWidth:700 }} onClick={e=>e.stopPropagation()}>
         <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20 }}>
           <div style={{ display:"flex",alignItems:"center",gap:12 }}>
-            <div className="modal-title">{form.id?"Modifica asiento":"Nuevo asiento"}</div>
+            <div className="modal-title">{form.id?"Editar asiento":"Nuevo asiento"}</div>
             <span className={`badge ${cuadra?"badge-green":"badge-red"}`}>{cuadra?" Cuadra":`Diff: ${fmt2(Math.abs(totalDebe-totalHaber))}`}</span>
           </div>
           <button onClick={onClose} style={{ background:"none",fontSize:20,color:"#999" }}>×</button>
@@ -1504,7 +1662,7 @@ function AsientoModal({ asiento, onSave, onClose }) {
           <div><label>N° Asiento</label><input value={form.numero} onChange={e=>setField("numero",e.target.value)} /></div>
           <div><label>Fecha</label><input type="date" value={form.fecha} onChange={e=>setField("fecha",e.target.value)} /></div>
         </div>
-        <div className="form-row" style={{ marginBottom:18 }}><label>Concepto</label><input value={form.concepto} onChange={e=>setField("concepto",e.target.value)} placeholder="Es: Compra compresores / Nómina / Factura..." /></div>
+        <div className="form-row" style={{ marginBottom:18 }}><label>Concepto</label><input value={form.concepto} onChange={e=>setField("concepto",e.target.value)} placeholder="Ej: Compra compresores / Nómina / Factura..." /></div>
 
         <div style={{ fontSize:10,fontWeight:700,letterSpacing:"0.1em",textTransform:"uppercase",color:"#bbb",marginBottom:8 }}>Partidas</div>
         <div style={{ background:"#FAFAFA",borderRadius:8,padding:12,marginBottom:14 }}>
@@ -1548,10 +1706,10 @@ function AsientoModal({ asiento, onSave, onClose }) {
           </div>
         </div>
 
-        <div className="form-row" style={{ marginBottom:16 }}><label>Notas</label><textarea rows={2} value={form.notas} onChange={e=>setField("notas",e.target.value)} placeholder="Riferimento fattura, note..." /></div>
+        <div className="form-row" style={{ marginBottom:16 }}><label>Notas</label><textarea rows={2} value={form.notas} onChange={e=>setField("notas",e.target.value)} placeholder="Referencia factura, notas..." /></div>
         <div style={{ display:"flex",gap:8 }}>
           <button className="btn-red" style={{ flex:1, opacity:cuadra?1:0.5 }} onClick={()=>onSave(form)} disabled={!cuadra}>{cuadra?"Registra asiento":" Non cuadra"}</button>
-          <button className="btn-ghost" onClick={onClose}>Annulla</button>
+          <button className="btn-ghost" onClick={onClose}>Cancelar</button>
         </div>
       </div>
     </div>
