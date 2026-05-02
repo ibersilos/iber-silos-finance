@@ -11,9 +11,20 @@ const STORAGE_KEY = "iber-silos-v2";
 // ── TAX & FINANCIAL CONSTANTS ─────────────────────────────────────────────────
 const IVA_RATES = { IT: 0.22, FR: 0.20, DE: 0.19, AT: 0.20, BE: 0.21, ES: 0.21 };
 const AMORT_RATES = { maquinaria: 0.12, equiposInfo: 0.25, vehiculos: 0.16 };
-const IVA_ESTERA_SOGLIA = 100;   // €/trimestre — sotto questa soglia non conviene pratica
+// Soglia corretta Direttiva 2008/9/CE: €400 annuo per paese (richiesta annuale),
+// €50 per richiesta trimestrale. Usando finestra annuale → soglia €400.
+const IVA_ESTERA_SOGLIA = 400;
 const IVA_FLAGS = { IT:"🇮🇹", FR:"🇫🇷", DE:"🇩🇪", AT:"🇦🇹", BE:"🇧🇪" };
 const IVA_PAESE_CONTI = { IT:"472.IT", FR:"472.FR", DE:"472.DE", AT:"472.AT", BE:"472.BE" };
+// Paesi UE con recupero IVA disponibile per società spagnole (Direttiva 2008/9/CE)
+const PAESI_UE_IVA = [
+  { code:"ES", label:"Spagna (IVA ordinaria 303)", flag:"🇪🇸", rate: 0.21 },
+  { code:"IT", label:"Italia",    flag:"🇮🇹", rate: 0.22 },
+  { code:"FR", label:"Francia",   flag:"🇫🇷", rate: 0.20 },
+  { code:"DE", label:"Germania",  flag:"🇩🇪", rate: 0.19 },
+  { code:"AT", label:"Austria",   flag:"🇦🇹", rate: 0.20 },
+  { code:"BE", label:"Belgio",    flag:"🇧🇪", rate: 0.21 },
+];
 
 const fmt = (n) => new Intl.NumberFormat("es-ES", { style: "currency", currency: "EUR", minimumFractionDigits: 2 }).format(n || 0);
 const fmtDate = (d) => d ? new Date(d).toLocaleDateString("it-IT") : "—";
@@ -92,14 +103,34 @@ function calcAmortAccumulated(asset, upToYear) {
 }
 
 // ── STORAGE ───────────────────────────────────────────────────────────────────
+// Campi IVA estera introdotti con Step A — valori neutri per fatture esistenti
+const IVA_ESTERA_DEFAULTS = {
+  paisIvaOrigen:    "ES",   // default Spagna = IVA ordinaria 303, nessuna pratica UE
+  vatForeignNumber: "",
+  ivaEsteraBase:    0,
+  ivaEsteraRate:    0,
+  ivaEsteraAmount:  0,
+};
+
+function migrateInvoice(inv) {
+  if (inv.type !== "ricevuta") return inv;
+  const migrated = { ...inv };
+  Object.entries(IVA_ESTERA_DEFAULTS).forEach(([k, v]) => {
+    if (migrated[k] === undefined || migrated[k] === null) migrated[k] = v;
+  });
+  return migrated;
+}
+
 async function loadData() {
   try {
     const res = localStorage.getItem(STORAGE_KEY);
     if (res) {
       const d = JSON.parse(res);
-      if (!d.asientos) d.asientos = [];
-      if (!d.fixedAssets) d.fixedAssets = DEFAULT_ASSETS;
-      if (!d.ibkrPositions) d.ibkrPositions = [];
+      if (!d.asientos)       d.asientos       = [];
+      if (!d.fixedAssets)    d.fixedAssets    = DEFAULT_ASSETS;
+      if (!d.ibkrPositions)  d.ibkrPositions  = [];
+      // Migration: aggiunge campi IVA estera a tutte le fatture ricevute esistenti
+      if (d.invoices) d.invoices = d.invoices.map(migrateInvoice);
       return d;
     }
   } catch {}
@@ -360,6 +391,22 @@ export default function IberSilosApp() {
     const grossAmount = parseFloat((net + ivaAmount).toFixed(2));
     const final = { ...inv, ivaAmount, grossAmount, id: inv.id || `inv-${Date.now()}` };
     if (!final.dueDate) final.dueDate = addDays(final.date, 30);
+    // Fix-4: garantisce che i campi IVA estera siano sempre presenti su fatture ricevute
+    if (final.type === "ricevuta") {
+      Object.entries(IVA_ESTERA_DEFAULTS).forEach(([k, v]) => {
+        if (final[k] === undefined || final[k] === null) final[k] = v;
+      });
+    }
+    // Fix-5: warning se IVA estera parzialmente compilata (paese estero + base > 0 ma importo mancante)
+    if (
+      final.type === "ricevuta" &&
+      final.paisIvaOrigen && final.paisIvaOrigen !== "ES" &&
+      (parseFloat(final.ivaEsteraBase) || 0) > 0 &&
+      !(parseFloat(final.ivaEsteraAmount) > 0)
+    ) {
+      showToast("⚠ IVA estera: base inserita ma importo recuperabile = 0. Verifica.", "warn");
+      // Non blocca il salvataggio — avvisa solo
+    }
     const exists = data.invoices.find(i => i.id === final.id);
     const invoices = exists ? data.invoices.map(i => i.id === final.id ? final : i) : [...data.invoices, final];
     persist({ ...data, invoices });
@@ -771,7 +818,7 @@ export default function IberSilosApp() {
               <button onClick={()=>setBimModal(false)} style={{ background:"none",fontSize:20,color:"#999" }}>×</button>
             </div>
             <div style={{ background:"#fffde7",border:"1.5px solid #ffe082",borderRadius:8,padding:"10px 14px",marginBottom:18,fontSize:12,color:"#b8860b" }}>
-              Pratica semestrale · Vencimiento: <strong>30/09 año siguiente</strong> · Soglia: <strong>IVA &gt; €{IVA_ESTERA_SOGLIA}/trimestre/país</strong>
+              Procedura annuale (Direttiva 2008/9/CE) · Scadenza: <strong>30/09 anno successivo</strong> · Soglia: <strong>€{IVA_ESTERA_SOGLIA} annuo per paese</strong> (€50 per richiesta trimestrale)
             </div>
             {[
               { paese:"🇮🇹 Italia", codice:"IT", aliquota:IVA_RATES.IT, note:"Pedaggi autostradali Italia via gestore prepagato (Euro Service GmbH). Targa GR516KN.", procedura:"Portale VIES + modulo elettronico Agenzia Entrate italiana. Documenti: fatture IT + estratto conto + delega.", normativa:"Dir. 2008/9/CE — rimborso IVA UE" },
@@ -907,30 +954,25 @@ function DashboardTab({ data, metrics, forecast, ejercicio, EJERCICIOS, bimModal
           });
         });
 
-        // Fallback: fatture ricevute con ivaAmount > 0 e keyword paese
+        // Fonte primaria: campo paisIvaOrigen esplicito sulla fattura (campo aggiunto Step A)
+        // Fonte secondaria: sottoconti contabili 472.IT / 472.FR ecc. (già calcolati sopra)
+        // Keyword-matching su note/descrizione RIMOSSO: inaffidabile per dati fiscali reali.
         const hasSottoconti = Object.values(ivaByTrim).some(t=>t.tot>0);
         if(!hasSottoconti){
           const invEsteri = data.invoices.filter(inv=>{
             const d = inv.fechaOperacion||inv.date||"";
-            return inv.type==="ricevuta" && d>=ej.from && d<=ej.to
-              && (parseFloat(inv.ivaAmount)||0)>0
-              && (inv.notes||inv.description||"").match(/(IT|FR|DE|AT|BE|NL|UK)|Italia|Francia|Germania|Austria/i);
+            return inv.type==="ricevuta"
+              && d>=ej.from && d<=ej.to
+              && inv.paisIvaOrigen                         // campo esplicito obbligatorio
+              && inv.paisIvaOrigen !== "ES"                // ES -> recupero via 303, non UE
+              && (parseFloat(inv.ivaEsteraAmount)||0)>0;  // usa ivaEsteraAmount, non ivaAmount generica
           });
           invEsteri.forEach(inv=>{
-            const mo=parseInt((inv.fechaOperacion||inv.date||"").slice(5,7));
-            const t=mo<=3?"T1":mo<=6?"T2":mo<=9?"T3":"T4";
-            const iva=parseFloat(inv.ivaAmount)||0;
-            const txt=(inv.notes||inv.description||"").toLowerCase();
-            // FIX: classificare per paese esplicitamente indicato nella fattura
-            // Default ES (Spagna) non è recuperabile — inserire solo se keyword esplicita paese estero UE
-            const paese=
-              txt.includes("franc")||txt.includes("frejus")?"FR":
-              txt.includes("deuts")?"DE":
-              txt.includes("belg")?"BE":
-              txt.includes("austria")?"AT":
-              txt.includes(" it ")||txt.includes("italia")||txt.includes("iva it")||txt.includes("pedaggi")?"IT":
-              null;
-            if(paese){ ivaByTrim[t][paese]+=iva; ivaByTrim[t].tot+=iva; }
+            const mo  = parseInt((inv.fechaOperacion||inv.date||"").slice(5,7));
+            const t   = mo<=3?"T1":mo<=6?"T2":mo<=9?"T3":"T4";
+            const iva = parseFloat(inv.ivaEsteraAmount)||0;
+            const paese = inv.paisIvaOrigen;
+            if(PAESI.includes(paese)){ ivaByTrim[t][paese]+=iva; ivaByTrim[t].tot+=iva; }
           });
         }
 
@@ -946,7 +988,9 @@ function DashboardTab({ data, metrics, forecast, ejercicio, EJERCICIOS, bimModal
             <div style={{ display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:8,marginBottom:14 }}>
               {trimestri.map(t=>{
                 const d=ivaByTrim[t.id];
-                const ok=d.tot>IVA_ESTERA_SOGLIA;
+                // Soglia per trimestre: €50 (richiesta trimestrale Direttiva 2008/9/CE)
+                // La soglia annua €400 viene valutata sul totale, non per trimestre
+                const okTrim=d.tot>50;
                 return (
                   <div key={t.id} style={{ background:d.tot>0?"#fffde7":"#FAFAFA",border:`1.5px solid ${d.tot>0?"#ffe082":"#E0E0E0"}`,borderRadius:8,padding:"10px 12px",textAlign:"center" }}>
                     <div style={{ fontSize:11,fontWeight:800,color:"#1A1A1A",marginBottom:6 }}>{t.id}</div>
@@ -960,8 +1004,8 @@ function DashboardTab({ data, metrics, forecast, ejercicio, EJERCICIOS, bimModal
                         </span>
                       ))}
                     </div>
-                    <div style={{ marginTop:6,fontSize:10,fontWeight:700,color:ok?"#2e7d32":"#999" }}>
-                      {d.tot>0?(ok?"✓ Apri pratica":"✗ Sotto soglia"):"-"}
+                    <div style={{ marginTop:6,fontSize:10,fontWeight:700,color:okTrim?"#2e7d32":"#999" }}>
+                      {d.tot>0?(okTrim?"✓ Soglia trim. ok":"✗ Sotto €50"):"-"}
                     </div>
                   </div>
                 );
@@ -970,7 +1014,13 @@ function DashboardTab({ data, metrics, forecast, ejercicio, EJERCICIOS, bimModal
             <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",padding:"10px 14px",background:"#f8fffe",borderRadius:8,border:"1.5px solid #a5d6a7" }}>
               <div>
                 <span style={{ fontSize:12,fontWeight:700 }}>Total recuperable: </span>
-                <span style={{ fontSize:16,fontWeight:800,color:"#28a745" }}>{fmt(totAnnuo.tot)}</span>
+                <span style={{ fontSize:16,fontWeight:800,color: totAnnuo.tot>=IVA_ESTERA_SOGLIA?"#28a745":"#b8860b" }}>{fmt(totAnnuo.tot)}</span>
+                {totAnnuo.tot>0&&totAnnuo.tot<IVA_ESTERA_SOGLIA&&(
+                  <span style={{ fontSize:10,color:"#b8860b",marginLeft:8 }}>⚠ Sotto soglia annua €{IVA_ESTERA_SOGLIA} — valutare se conviene pratica</span>
+                )}
+                {totAnnuo.tot>=IVA_ESTERA_SOGLIA&&(
+                  <span style={{ fontSize:10,color:"#28a745",marginLeft:8 }}>✓ Soglia annua €{IVA_ESTERA_SOGLIA} superata — aprire pratica Hacienda</span>
+                )}
                 {totAnnuo.tot>0&&<div style={{ display:"flex",flexWrap:"wrap",gap:4,marginTop:6 }}>
                   {PAESI.filter(p=>totAnnuo[p]>0).map(p=>(
                     <span key={p} style={{ display:"inline-flex",alignItems:"center",gap:3,background:"#e8f5e9",border:"1px solid #a5d6a7",borderRadius:20,padding:"2px 8px",fontSize:11,fontWeight:700,color:"#2e7d32" }}>
@@ -1370,16 +1420,35 @@ function InvoiceTable({ invoices, onEdit, onDelete }) {
         <div style={{ overflowX:"auto" }}>
           <table>
             <thead><tr><th>N°</th><th>Fecha</th><th>Venc.</th><th>Tipo</th><th>Contraparte</th><th>Descripción</th><th style={{ textAlign:"right" }}>Base imp.</th><th>IVA</th><th style={{ textAlign:"right" }}>Total</th><th>Stato</th><th></th></tr></thead>
-            <tbody>{[...filtered].reverse().map(inv=>(
-              <tr key={inv.id}>
-                <td style={{ color:"#E30613",fontWeight:700,whiteSpace:"nowrap" }}>{inv.number||"—"}</td>
+            <tbody>{[...filtered].reverse().map(inv=>{
+              // Fix-3: badge ⚠ per fatture ricevute con IVA ma paese non classificato
+              const needsIvaClassification =
+                inv.type === "ricevuta" &&
+                (parseFloat(inv.ivaAmount) > 0 || parseFloat(inv.netAmount) > 100) &&
+                (!inv.paisIvaOrigen || inv.paisIvaOrigen === "ES") &&
+                // Solo se il fornitore è tipicamente estero
+                (inv.supplier||"").match(/DKV|BMB|CCI|Buzzatti|T-Way|Truck Service/i);
+
+              return (
+              <tr key={inv.id} style={{ background: needsIvaClassification ? "#fffde7" : undefined }}>
+                <td style={{ color:"#E30613",fontWeight:700,whiteSpace:"nowrap" }}>
+                  {inv.number||"—"}
+                  {needsIvaClassification && (
+                    <span title="IVA estera da classificare" style={{ marginLeft:5,fontSize:11,cursor:"help" }}>⚠️</span>
+                  )}
+                </td>
                 <td style={{ whiteSpace:"nowrap",color:"#999" }}>{fmtDate(inv.date)}</td>
                 <td style={{ whiteSpace:"nowrap",color:inv.dueDate<new Date().toISOString().split("T")[0]&&inv.status==="aperta"?"#E30613":"#999" }}>{fmtDate(inv.dueDate)}</td>
                 <td><span className={`badge ${inv.type==="emessa"?"badge-green":"badge-yellow"}`}>{inv.type}</span></td>
                 <td style={{ maxWidth:130,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap" }}>{inv.type==="emessa"?inv.client:inv.supplier}</td>
                 <td style={{ maxWidth:160,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",color:"#999",fontSize:12 }}>{inv.description}</td>
                 <td style={{ textAlign:"right",fontWeight:600 }}>{fmt(inv.netAmount)}</td>
-                <td style={{ color:"#bbb",fontSize:11 }}>{inv.ivaType}</td>
+                <td style={{ color:"#bbb",fontSize:11 }}>
+                  {inv.ivaType}
+                  {inv.paisIvaOrigen && inv.paisIvaOrigen!=="ES" && (
+                    <span style={{ marginLeft:4 }}>{IVA_FLAGS[inv.paisIvaOrigen]||""}</span>
+                  )}
+                </td>
                 <td style={{ textAlign:"right",fontWeight:600 }}>{fmt(inv.grossAmount)}</td>
                 <td><StatusBadge status={inv.status}/></td>
                 <td style={{ whiteSpace:"nowrap" }}>
@@ -1387,7 +1456,8 @@ function InvoiceTable({ invoices, onEdit, onDelete }) {
                   <button className="btn-danger" onClick={()=>onDelete(inv.id)}>🗑</button>
                 </td>
               </tr>
-            ))}</tbody>
+              );
+            })}</tbody>
           </table>
         </div>
       }
@@ -1431,50 +1501,173 @@ function MovementTable({ movements, invoices, onEdit, onDelete, onReconcile }) {
 }
 
 function InvoiceModal({ inv, onSave, onClose }) {
-  const IVA_TYPES_KEYS = { "21%": 0.21, "RC (reverse charge)": 0, "Esente": 0, "0%": 0 };
+  const IVA_TYPES_KEYS = IVA_TYPES; // usa la costante globale, non duplicare
   const [form, setForm] = useState({ ...inv });
+
   const set = (k, v) => setForm(f => {
     const updated = { ...f, [k]: v };
-    if (k==="netAmount"||k==="ivaType") {
-      const net = parseFloat(k==="netAmount"?v:f.netAmount)||0;
-      const rate = IVA_TYPES_KEYS[k==="ivaType"?v:f.ivaType]??0.21;
-      updated.ivaAmount = parseFloat((net*rate).toFixed(2));
-      updated.grossAmount = parseFloat((net+updated.ivaAmount).toFixed(2));
+
+    // Ricalcolo IVA ES (ordinaria, conto 472)
+    if (k==="netAmount" || k==="ivaType") {
+      const net  = parseFloat(k==="netAmount" ? v : f.netAmount) || 0;
+      const rate = IVA_TYPES_KEYS[k==="ivaType" ? v : f.ivaType] ?? 0.21;
+      updated.ivaAmount   = parseFloat((net * rate).toFixed(2));
+      updated.grossAmount = parseFloat((net + updated.ivaAmount).toFixed(2));
     }
+
+    // Ricalcolo automatico IVA estera quando cambia base o paese
+    if (k==="ivaEsteraBase" || k==="paisIvaOrigen") {
+      const base    = parseFloat(k==="ivaEsteraBase" ? v : f.ivaEsteraBase) || 0;
+      const paese   = k==="paisIvaOrigen" ? v : (f.paisIvaOrigen || "ES");
+      const paeseInfo = PAESI_UE_IVA.find(p => p.code === paese);
+      const rate    = paeseInfo ? paeseInfo.rate : 0;
+      // Solo paesi esteri (non ES) generano IVA recuperabile con procedura UE
+      updated.ivaEsteraRate   = paese !== "ES" ? rate : 0;
+      updated.ivaEsteraAmount = paese !== "ES" ? parseFloat((base * rate).toFixed(2)) : 0;
+    }
+
+    // Se si cambia ivaEsteraAmount manualmente, ricalcola il rate
+    if (k==="ivaEsteraAmount") {
+      const base = parseFloat(f.ivaEsteraBase) || 0;
+      updated.ivaEsteraRate = base > 0 ? parseFloat(((parseFloat(v)||0) / base).toFixed(4)) : 0;
+    }
+
     return updated;
   });
+
+  const isRicevuta = form.type === "ricevuta";
+  const paeseInfo  = PAESI_UE_IVA.find(p => p.code === (form.paisIvaOrigen || "ES"));
+  const hasIvaEstera = isRicevuta && form.paisIvaOrigen && form.paisIvaOrigen !== "ES" && (parseFloat(form.ivaEsteraAmount)||0) > 0;
+
   return (
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal" onClick={e=>e.stopPropagation()}>
         <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20 }}>
-          <div className="modal-title">{form.id?"Modifica fattura":"Nuova fattura"} — <span style={{ color:form.type==="emessa"?"#28a745":"#b8860b" }}>{form.type}</span></div>
+          <div className="modal-title">
+            {form.id ? "Modifica fattura" : "Nuova fattura"} —{" "}
+            <span style={{ color:form.type==="emessa"?"#28a745":"#b8860b" }}>{form.type}</span>
+          </div>
           <button onClick={onClose} style={{ background:"none",fontSize:20,color:"#999" }}>×</button>
         </div>
+
+        {/* Tipo fattura */}
         <div className="form-row"><div style={{ display:"flex",gap:8 }}>
-          <button className={`tab-btn ${form.type==="emessa"?"active":""}`} onClick={()=>set("type","emessa")} style={{ flex:1 }}>Emessa</button>
+          <button className={`tab-btn ${form.type==="emessa"?"active":""}`}   onClick={()=>set("type","emessa")}   style={{ flex:1 }}>Emessa</button>
           <button className={`tab-btn ${form.type==="ricevuta"?"active":""}`} onClick={()=>set("type","ricevuta")} style={{ flex:1 }}>Ricevuta</button>
         </div></div>
+
+        {/* Numero + data */}
         <div className="form-row form-row-2">
           <div><label>N° Factura</label><input value={form.number} onChange={e=>set("number",e.target.value)} /></div>
           <div><label>Fecha</label><input type="date" value={form.date} onChange={e=>set("date",e.target.value)} /></div>
         </div>
+
+        {/* Scadenza + stato */}
         <div className="form-row form-row-2">
           <div><label>Scadenza</label><input type="date" value={form.dueDate||""} onChange={e=>set("dueDate",e.target.value)} /></div>
           <div><label>Stato</label><select value={form.status} onChange={e=>set("status",e.target.value)}>{["aperta","pagata","riconciliata","annullata"].map(s=><option key={s}>{s}</option>)}</select></div>
         </div>
+
+        {/* Cliente / Fornitore */}
         {form.type==="emessa"
           ? <div className="form-row"><label>Cliente</label><select value={form.client||""} onChange={e=>set("client",e.target.value)}><option value="">Seleziona...</option>{CLIENTS.map(c=><option key={c}>{c}</option>)}</select></div>
           : <div className="form-row"><label>Proveedor</label><select value={form.supplier||""} onChange={e=>set("supplier",e.target.value)}><option value="">Seleziona...</option>{SUPPLIERS.map(s=><option key={s}>{s}</option>)}</select></div>
         }
+
         <div className="form-row"><label>Descripción</label><input value={form.description||""} onChange={e=>set("description",e.target.value)} /></div>
+
+        {/* IVA ordinaria ES */}
         <div className="form-row form-row-2">
           <div><label>Base imponible (€)</label><input type="number" step="0.01" value={form.netAmount||""} onChange={e=>set("netAmount",e.target.value)} /></div>
-          <div><label>Tipo IVA</label><select value={form.ivaType||"21%"} onChange={e=>set("ivaType",e.target.value)}>{Object.keys(IVA_TYPES_KEYS).map(k=><option key={k}>{k}</option>)}</select></div>
+          <div><label>Tipo IVA (ES)</label><select value={form.ivaType||"21%"} onChange={e=>set("ivaType",e.target.value)}>{Object.keys(IVA_TYPES_KEYS).map(k=><option key={k}>{k}</option>)}</select></div>
         </div>
         <div className="form-row form-row-2">
-          <div><label>IVA (€)</label><input readOnly value={form.ivaAmount||0} style={{ color:"#bbb" }} /></div>
+          <div><label>IVA ES (€)</label><input readOnly value={form.ivaAmount||0} style={{ color:"#bbb" }} /></div>
           <div><label>Totale lordo (€)</label><input readOnly value={form.grossAmount||0} style={{ color:"#E30613",fontWeight:700 }} /></div>
         </div>
+
+        {/* ── SEZIONE IVA ESTERA — solo su fatture ricevute ── */}
+        {isRicevuta && (
+          <div style={{ background:"#fffde7", border:"1.5px solid #ffe082", borderRadius:10, padding:"14px 16px", marginBottom:14, marginTop:4 }}>
+            <div style={{ fontSize:10, fontWeight:700, letterSpacing:"1.5px", textTransform:"uppercase", color:"#b8860b", marginBottom:12, display:"flex", alignItems:"center", gap:6 }}>
+              <span>💶</span> IVA Estera — Recupero Direttiva 2008/9/CE
+            </div>
+
+            {/* Paese origine IVA */}
+            <div className="form-row form-row-2">
+              <div>
+                <label>Paese IVA origine</label>
+                <select value={form.paisIvaOrigen||"ES"} onChange={e=>set("paisIvaOrigen",e.target.value)}>
+                  {PAESI_UE_IVA.map(p=>(
+                    <option key={p.code} value={p.code}>{p.flag} {p.label} ({(p.rate*100).toFixed(0)}%)</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label>P.IVA / VAT estera fornitore</label>
+                <input
+                  value={form.vatForeignNumber||""}
+                  onChange={e=>set("vatForeignNumber",e.target.value)}
+                  placeholder={paeseInfo?.code==="IT"?"IT12345678901":"es. FR12345678901"}
+                />
+              </div>
+            </div>
+
+            {/* Base + aliquota + IVA estera */}
+            <div className="form-row form-row-2">
+              <div>
+                <label>Base imponibile estera (€)</label>
+                <input
+                  type="number" step="0.01"
+                  value={form.ivaEsteraBase||""}
+                  onChange={e=>set("ivaEsteraBase",e.target.value)}
+                  placeholder="Imponibile su cui è calcolata l'IVA estera"
+                />
+              </div>
+              <div>
+                <label>Aliquota applicata</label>
+                <select value={form.ivaEsteraRate||0} onChange={e=>set("ivaEsteraRate", parseFloat(e.target.value))}>
+                  <option value={0}>—</option>
+                  {PAESI_UE_IVA.filter(p=>p.code!=="ES").map(p=>(
+                    <option key={p.code} value={p.rate}>{p.flag} {(p.rate*100).toFixed(0)}% ({p.label})</option>
+                  ))}
+                  <option value={0.10}>10% (ridotta)</option>
+                  <option value={0.05}>5% (super-ridotta)</option>
+                </select>
+              </div>
+            </div>
+
+            <div className="form-row">
+              <div>
+                <label>IVA estera recuperabile (€)</label>
+                <input
+                  type="number" step="0.01"
+                  value={form.ivaEsteraAmount||""}
+                  onChange={e=>set("ivaEsteraAmount",e.target.value)}
+                  style={{ fontWeight:700, color: hasIvaEstera ? "#b8860b" : "#1A1A1A", borderColor: hasIvaEstera ? "#ffe082" : "#E0E0E0" }}
+                  placeholder="Calcolato automaticamente o inserisci manualmente"
+                />
+              </div>
+            </div>
+
+            {/* Badge stato recupero */}
+            {form.paisIvaOrigen && form.paisIvaOrigen !== "ES" && (
+              <div style={{ marginTop:8, fontSize:11, color:"#b8860b", display:"flex", alignItems:"center", gap:6 }}>
+                {paeseInfo?.flag}
+                {hasIvaEstera
+                  ? <span>IVA recuperabile via <strong>Hacienda → portale UE</strong> · scadenza <strong>30/09 anno successivo</strong></span>
+                  : <span style={{ color:"#bbb" }}>Inserisci base e aliquota per calcolare il recupero</span>
+                }
+              </div>
+            )}
+            {form.paisIvaOrigen === "ES" && (
+              <div style={{ fontSize:11, color:"#999", marginTop:4 }}>
+                IVA spagnola → recupero ordinario via <strong>Modelo 303 / REDEME</strong>. Nessuna procedura UE necessaria.
+              </div>
+            )}
+          </div>
+        )}
+
         <div className="form-row"><label>Link documento</label><input value={form.dropboxLink||""} onChange={e=>set("dropboxLink",e.target.value)} placeholder="https://..." /></div>
         <div className="form-row"><label>Notas</label><textarea rows={2} value={form.notes||""} onChange={e=>set("notes",e.target.value)} /></div>
         <div style={{ display:"flex",gap:8,marginTop:8 }}>
