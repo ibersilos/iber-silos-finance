@@ -1209,59 +1209,233 @@ function DashboardTab({ data, metrics, forecast, ejercicio, EJERCICIOS, bimModal
         );
       })()}
 
-      {/* ── GRAFICO MENSILE ── */}
+      {/* ── PANNELLO 1: CICLO DI CASSA (DSO / DPO) ── */}
       {(() => {
         const ej = EJERCICIOS.find(e=>e.id===ejercicio)||EJERCICIOS[2];
-        const byMonth = {};
-        data.invoices.forEach(inv => {
-          const d = inv.fechaOperacion || inv.date || "";
-          if (!d || d < ej.from || d > ej.to) return;
-          const m = d.slice(0,7);
-          if (!byMonth[m]) byMonth[m] = { month: m.slice(5)+"/"+m.slice(2,4), attive: 0, passive: 0 };
-          if (inv.type === "emessa")   byMonth[m].attive  += parseFloat(inv.netAmount)||0;
-          if (inv.type === "ricevuta") byMonth[m].passive += parseFloat(inv.netAmount)||0;
-        });
-        const chartData = Object.values(byMonth).sort((a,b)=>a.month.localeCompare(b.month));
-        if (!chartData.length) return null;
+        const todayStr = new Date().toISOString().split("T")[0];
+        const inv = data.invoices.filter(i=>{ const d=i.fechaOperacion||i.date||""; return d>=ej.from&&d<=ej.to; });
+        const emesse   = inv.filter(i=>i.type==="emessa");
+        const ricevute = inv.filter(i=>i.type==="ricevuta");
+
+        // DSO: media giorni tra data fattura e data incasso (solo riconciliate con movimento)
+        const movMap = {};
+        data.movements.forEach(m=>{ if(m.invoiceId) movMap[m.invoiceId]=m.date; });
+        const dsoCalcs = emesse
+          .filter(i=>i.status==="riconciliata" && movMap[i.id])
+          .map(i=>Math.max(0, Math.round((new Date(movMap[i.id])-new Date(i.date))/86400000)));
+        const dso = dsoCalcs.length ? Math.round(dsoCalcs.reduce((a,b)=>a+b,0)/dsoCalcs.length) : null;
+
+        // DPO: media giorni tra data fattura ricevuta e data pagamento
+        const dpoCalcs = ricevute
+          .filter(i=>i.status==="riconciliata" && movMap[i.id])
+          .map(i=>Math.max(0, Math.round((new Date(movMap[i.id])-new Date(i.date))/86400000)));
+        const dpo = dpoCalcs.length ? Math.round(dpoCalcs.reduce((a,b)=>a+b,0)/dpoCalcs.length) : null;
+
+        // Crediti scaduti: fatture emesse aperte con dueDate < oggi
+        const scaduti = emesse.filter(i=>i.status==="aperta" && i.dueDate && i.dueDate < todayStr);
+        const totScaduti = scaduti.reduce((s,i)=>s+(parseFloat(i.grossAmount)||0),0);
+        const maxScaduto = scaduti.length
+          ? Math.max(...scaduti.map(i=>Math.round((new Date(todayStr)-new Date(i.dueDate))/86400000)))
+          : 0;
+
+        // Concentrazione clienti: % Buzzatti su fatturato
+        const fatTot = emesse.reduce((s,i)=>s+(parseFloat(i.netAmount)||0),0);
+        const fatBuzz = emesse.filter(i=>(i.client||"").includes("Buzzatti")).reduce((s,i)=>s+(parseFloat(i.netAmount)||0),0);
+        const concBuzz = fatTot > 0 ? (fatBuzz/fatTot*100) : 0;
+
         return (
-          <div className="card" style={{ marginBottom:16 }}>
-            <div style={{ fontSize:10,fontWeight:700,letterSpacing:"1.5px",textTransform:"uppercase",color:"#bbb",marginBottom:16 }}>Fatturato mensile — Attivo vs Passivo</div>
-            <div style={{ display:"flex",gap:16,marginBottom:10,fontSize:11 }}>
-              <span style={{ display:"flex",alignItems:"center",gap:5 }}><span style={{ width:12,height:12,background:"#E30613",borderRadius:2,display:"inline-block" }}/> Facturas emitidas</span>
-              <span style={{ display:"flex",alignItems:"center",gap:5 }}><span style={{ width:12,height:12,background:"#3949ab",borderRadius:2,display:"inline-block" }}/> Facturas recibidas</span>
-              <span style={{ display:"flex",alignItems:"center",gap:5 }}><span style={{ width:12,height:12,background:"#28a745",borderRadius:2,display:"inline-block" }}/> Margine</span>
+          <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:14, marginBottom:16 }}>
+            {/* DSO */}
+            <div className="card" style={{ borderLeft:`4px solid ${dso>30?"#E30613":"#28a745"}` }}>
+              <div className="kpi-label">DSO — Giorni incasso</div>
+              <div className="kpi-value" style={{ color: dso===null?"#bbb":dso>30?"#E30613":"#28a745", fontSize:28 }}>
+                {dso===null?"—":`${dso}gg`}
+              </div>
+              <div style={{ fontSize:11,color:"#999",marginTop:4 }}>
+                {dso===null?"Nessuna fattura riconciliata":dso<=30?"✓ Sotto 30 giorni":dso<=45?"⚠ Attenzione":"🔴 Alto rischio liquidità"}
+              </div>
+              <div style={{ fontSize:10,color:"#bbb",marginTop:2 }}>Su {dsoCalcs.length} fatture riconciliate</div>
             </div>
-            <ResponsiveContainer width="100%" height={220}>
-              <BarChart data={chartData} barGap={4} barCategoryGap="25%">
-                <CartesianGrid strokeDasharray="3 3" stroke="#F5F5F5" vertical={false} />
-                <XAxis dataKey="month" tick={{ fontSize:10,fill:"#bbb" }} axisLine={false} tickLine={false} />
-                <YAxis tick={{ fontSize:10,fill:"#bbb" }} tickFormatter={v=>v>=1000?`${(v/1000).toFixed(0)}k`:`${v}`} axisLine={false} tickLine={false} />
-                <Tooltip contentStyle={{ background:"white",border:"1.5px solid #E0E0E0",borderRadius:8,fontSize:12 }} formatter={(v,n)=>[fmt(v), n==="attive"?"Emitidas":n==="passive"?"Recibidas":"Margen"]} />
-                <Bar dataKey="attive"  fill="#E30613" radius={[4,4,0,0]} />
-                <Bar dataKey="passive" fill="#3949ab" radius={[4,4,0,0]} />
-                <Bar dataKey={(row)=>Math.max(0,row.attive-row.passive)} name="margine" fill="#28a745" radius={[4,4,0,0]} />
-              </BarChart>
-            </ResponsiveContainer>
+
+            {/* DPO */}
+            <div className="card" style={{ borderLeft:`4px solid ${dpo>45?"#E30613":dpo>30?"#b8860b":"#3949ab"}` }}>
+              <div className="kpi-label">DPO — Giorni pagamento</div>
+              <div className="kpi-value" style={{ color:"#3949ab", fontSize:28 }}>
+                {dpo===null?"—":`${dpo}gg`}
+              </div>
+              <div style={{ fontSize:11,color:"#999",marginTop:4 }}>
+                {dpo===null?"Nessun pagamento":dso!==null&&dso>dpo?"⚠ Incassi più lenti dei pagamenti":"✓ Ciclo bilanciato"}
+              </div>
+              <div style={{ fontSize:10,color:"#bbb",marginTop:2 }}>Su {dpoCalcs.length} fatture pagate</div>
+            </div>
+
+            {/* Concentrazione */}
+            <div className="card" style={{ borderLeft:`4px solid ${concBuzz>90?"#E30613":concBuzz>70?"#b8860b":"#28a745"}` }}>
+              <div className="kpi-label">Concentrazione Buzzatti</div>
+              <div className="kpi-value" style={{ color:concBuzz>90?"#E30613":"#b8860b", fontSize:28 }}>
+                {concBuzz.toFixed(0)}%
+              </div>
+              <div style={{ fontSize:11,color:"#999",marginTop:4 }}>
+                {concBuzz>90?"🔴 Rischio mono-cliente elevato":concBuzz>70?"⚠ Diversificare urgente":"✓ Ok"}
+              </div>
+              <div style={{ fontSize:10,color:"#bbb",marginTop:2 }}>{fmt(fatBuzz)} su {fmt(fatTot)}</div>
+            </div>
           </div>
         );
       })()}
 
-      <div className="card">
-        <div style={{ fontSize:10, fontWeight:700, letterSpacing:"1.5px", textTransform:"uppercase", color:"#bbb", marginBottom:12 }}>Últimas facturas</div>
-        {data.invoices.length===0 ? <div style={{ color:"#bbb", fontSize:13 }}>Sin facturas todavía.</div> :
-          <table><thead><tr><th>N°</th><th>Fecha</th><th>Tipo</th><th>Contraparte</th><th>Base imp.</th><th>Stato</th></tr></thead>
-          <tbody>{data.invoices.slice(-8).reverse().map(inv=>(
-            <tr key={inv.id}>
-              <td style={{ fontWeight:700, color:"#E30613" }}>{inv.number||"—"}</td>
-              <td>{fmtDate(inv.date)}</td>
-              <td><span className={`badge ${inv.type==="emessa"?"badge-green":"badge-yellow"}`}>{inv.type}</span></td>
-              <td>{inv.type==="emessa"?inv.client:inv.supplier}</td>
-              <td style={{ fontWeight:600 }}>{fmt(inv.netAmount)}</td>
-              <td><StatusBadge status={inv.status}/></td>
-            </tr>
-          ))}</tbody></table>
-        }
-      </div>
+      {/* ── PANNELLO 2: CASH FLOW REALE DAL BANCO (mensile) ── */}
+      {(() => {
+        if (!data.movements.length) return null;
+        const ej = EJERCICIOS.find(e=>e.id===ejercicio)||EJERCICIOS[2];
+        const byMonth = {};
+        data.movements
+          .filter(m=>{ const d=m.date||""; return d>=ej.from&&d<=ej.to; })
+          .forEach(m=>{
+            const mo = m.date.slice(0,7);
+            if (!byMonth[mo]) byMonth[mo] = { month:m.date.slice(5,7)+"/"+m.date.slice(2,4), entrate:0, uscite:0 };
+            if (m.type==="entrata") byMonth[mo].entrate += parseFloat(m.amount)||0;
+            else                    byMonth[mo].uscite  += parseFloat(m.amount)||0;
+          });
+        const chartData = Object.values(byMonth)
+          .sort((a,b)=>a.month.localeCompare(b.month))
+          .map(d=>({ ...d, netto: d.entrate - d.uscite }));
+        if (!chartData.length) return null;
+        return (
+          <div className="card" style={{ marginBottom:16 }}>
+            <div style={{ fontSize:10,fontWeight:700,letterSpacing:"1.5px",textTransform:"uppercase",color:"#bbb",marginBottom:14 }}>
+              Cash Flow Banco — Mensile reale (movimenti Revolut)
+            </div>
+            <div style={{ display:"flex",gap:16,marginBottom:10,fontSize:11 }}>
+              <span style={{ display:"flex",alignItems:"center",gap:5 }}><span style={{ width:12,height:12,background:"#28a745",borderRadius:2,display:"inline-block" }}/> Entrate</span>
+              <span style={{ display:"flex",alignItems:"center",gap:5 }}><span style={{ width:12,height:12,background:"#3949ab",borderRadius:2,display:"inline-block" }}/> Uscite</span>
+              <span style={{ display:"flex",alignItems:"center",gap:5 }}><span style={{ width:12,height:12,background:"#E30613",borderRadius:2,display:"inline-block" }}/> Netto</span>
+            </div>
+            <ResponsiveContainer width="100%" height={200}>
+              <BarChart data={chartData} barGap={2} barCategoryGap="20%">
+                <CartesianGrid strokeDasharray="3 3" stroke="#F5F5F5" vertical={false} />
+                <XAxis dataKey="month" tick={{ fontSize:11,fill:"#bbb" }} axisLine={false} tickLine={false} />
+                <YAxis tick={{ fontSize:10,fill:"#bbb" }} tickFormatter={v=>v>=1000?`${(v/1000).toFixed(0)}k`:`${v}`} axisLine={false} tickLine={false} />
+                <Tooltip
+                  contentStyle={{ background:"white",border:"1.5px solid #E0E0E0",borderRadius:8,fontSize:12 }}
+                  formatter={(v,n)=>[fmt(v), n==="entrate"?"Entrate":n==="uscite"?"Uscite":"Netto"]}
+                />
+                <ReferenceLine y={0} stroke="rgba(227,6,19,0.3)" strokeDasharray="4 4" />
+                <Bar dataKey="entrate" fill="#28a745" radius={[3,3,0,0]} />
+                <Bar dataKey="uscite"  fill="#3949ab" radius={[3,3,0,0]} />
+                <Bar dataKey="netto"   fill={(d)=>d.netto>=0?"#E30613":"#ff6b6b"} radius={[3,3,0,0]} />
+              </BarChart>
+            </ResponsiveContainer>
+            <div style={{ fontSize:10,color:"#bbb",marginTop:6,textAlign:"right" }}>
+              Dati reali da estratto conto Revolut Business — non competenza contabile
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* ── PANNELLO 3: CREDITI SCADUTI ── */}
+      {(() => {
+        const todayStr = new Date().toISOString().split("T")[0];
+        const scaduti = data.invoices
+          .filter(i=>i.type==="emessa" && i.status==="aperta" && i.dueDate && i.dueDate < todayStr)
+          .map(i=>({ ...i, giorniScaduto: Math.round((new Date(todayStr)-new Date(i.dueDate))/86400000) }))
+          .sort((a,b)=>b.giorniScaduto-a.giorniScaduto);
+        const aperteNonScadute = data.invoices.filter(i=>i.type==="emessa"&&i.status==="aperta"&&(!i.dueDate||i.dueDate>=todayStr));
+        if (!scaduti.length && !aperteNonScadute.length) return null;
+        return (
+          <div className="card" style={{ marginBottom:16 }}>
+            <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14 }}>
+              <div style={{ fontSize:10,fontWeight:700,letterSpacing:"1.5px",textTransform:"uppercase",color:"#bbb" }}>
+                Crediti — Scaduto e in scadenza
+              </div>
+              {scaduti.length>0 && (
+                <span style={{ background:"#ffebee",border:"1.5px solid #ef9a9a",borderRadius:6,padding:"4px 12px",fontSize:12,fontWeight:800,color:"#E30613" }}>
+                  🔴 {fmt(scaduti.reduce((s,i)=>s+(parseFloat(i.grossAmount)||0),0))} scaduto
+                </span>
+              )}
+            </div>
+            <table>
+              <thead><tr><th>N°</th><th>Cliente</th><th>Scadenza</th><th style={{ textAlign:"right" }}>Giorni</th><th style={{ textAlign:"right" }}>Importo</th><th>Stato</th></tr></thead>
+              <tbody>
+                {scaduti.map(inv=>(
+                  <tr key={inv.id} style={{ background:"#fff5f5" }}>
+                    <td style={{ fontWeight:700,color:"#E30613" }}>{inv.number||"—"}</td>
+                    <td style={{ fontWeight:600 }}>{inv.client||"—"}</td>
+                    <td style={{ color:"#E30613",fontWeight:700 }}>{fmtDate(inv.dueDate)}</td>
+                    <td style={{ textAlign:"right",fontWeight:800,color:"#E30613" }}>+{inv.giorniScaduto}gg</td>
+                    <td style={{ textAlign:"right",fontWeight:700 }}>{fmt(inv.grossAmount)}</td>
+                    <td><span className="badge badge-red">scaduta</span></td>
+                  </tr>
+                ))}
+                {aperteNonScadute.map(inv=>{
+                  const gg = inv.dueDate ? Math.round((new Date(inv.dueDate)-new Date(todayStr))/86400000) : null;
+                  return (
+                    <tr key={inv.id}>
+                      <td style={{ fontWeight:700,color:"#E30613" }}>{inv.number||"—"}</td>
+                      <td style={{ fontWeight:600 }}>{inv.client||"—"}</td>
+                      <td style={{ color:"#999" }}>{fmtDate(inv.dueDate)}</td>
+                      <td style={{ textAlign:"right",color:gg!==null&&gg<=7?"#b8860b":"#bbb" }}>{gg!==null?`${gg}gg`:"—"}</td>
+                      <td style={{ textAlign:"right",fontWeight:700 }}>{fmt(inv.grossAmount)}</td>
+                      <td><span className="badge badge-yellow">aperta</span></td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        );
+      })()}
+
+      {/* ── PANNELLO 4: ESPOSIZIONE SUBVETTORI ── */}
+      {(() => {
+        const ej = EJERCICIOS.find(e=>e.id===ejercicio)||EJERCICIOS[2];
+        const ricevute = data.invoices.filter(i=>{
+          const d=i.fechaOperacion||i.date||"";
+          return i.type==="ricevuta" && d>=ej.from && d<=ej.to;
+        });
+        // Raggruppa per fornitore
+        const bySupp = {};
+        ricevute.forEach(i=>{
+          const s = i.supplier || "Altro";
+          if (!bySupp[s]) bySupp[s] = { supplier:s, totale:0, aperte:0, pagato:0 };
+          const net = parseFloat(i.netAmount)||0;
+          bySupp[s].totale += net;
+          if (i.status==="aperta") bySupp[s].aperte += parseFloat(i.grossAmount)||0;
+          else bySupp[s].pagato += net;
+        });
+        const rows = Object.values(bySupp).sort((a,b)=>b.totale-a.totale).slice(0,6);
+        if (!rows.length) return null;
+        const totale = rows.reduce((s,r)=>s+r.totale,0);
+        return (
+          <div className="card">
+            <div style={{ fontSize:10,fontWeight:700,letterSpacing:"1.5px",textTransform:"uppercase",color:"#bbb",marginBottom:14 }}>
+              Esposizione fornitori — {EJERCICIOS.find(e=>e.id===ejercicio)?.label}
+            </div>
+            <table>
+              <thead><tr><th>Fornitore</th><th style={{ textAlign:"right" }}>Totale costi</th><th style={{ textAlign:"right" }}>% su totale</th><th style={{ textAlign:"right" }}>Ancora aperto</th></tr></thead>
+              <tbody>
+                {rows.map(r=>(
+                  <tr key={r.supplier}>
+                    <td style={{ fontWeight:600 }}>{r.supplier}</td>
+                    <td style={{ textAlign:"right" }}>{fmt(r.totale)}</td>
+                    <td style={{ textAlign:"right" }}>
+                      <div style={{ display:"flex",alignItems:"center",justifyContent:"flex-end",gap:8 }}>
+                        <div style={{ width:60,height:4,background:"#F5F5F5",borderRadius:2 }}>
+                          <div style={{ width:`${Math.min(r.totale/totale*100,100)}%`,height:"100%",background:"#3949ab",borderRadius:2 }} />
+                        </div>
+                        <span style={{ fontSize:11,color:"#999" }}>{(r.totale/totale*100).toFixed(0)}%</span>
+                      </div>
+                    </td>
+                    <td style={{ textAlign:"right",fontWeight:r.aperte>0?700:400,color:r.aperte>0?"#E30613":"#bbb" }}>
+                      {r.aperte>0?fmt(r.aperte):"—"}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        );
+      })()}
     </div>
   );
 }
