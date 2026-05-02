@@ -4,7 +4,23 @@ import { LineChart, Line, BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContai
 // ── CONSTANTS ─────────────────────────────────────────────────────────────────
 const CLIENTS = ["Buzzatti", "Coder SA", "Molino dalla Giovanna", "Presta Silo", "Altro"];
 const SUPPLIERS = ["CCI Italia SRLS", "BMB Trasporti", "T-Way (renting)", "La Clau Assessors", "Gestrams", "DKV", "E100", "Altro"];
-const IVA_TYPES = { "21%": 0.21, "RC (reverse charge)": 0, "Esente": 0, "0%": 0 };
+const IVA_TYPES = {
+  "21%": 0.21,
+  "10%": 0.10,
+  "4%": 0.04,
+  "RC (reverse charge)": 0,
+  "RC art.44 Dir.2006/112/CE": 0,
+  "RC art.41 D.L.331/93": 0,
+  "art.25 Ley 37/1992": 0,
+  "Esente": 0,
+  "0%": 0,
+  "NoSujeto": 0,
+  "IVA IT 22%": 0,   // IVA estera IT — il valore recuperabile è in ivaEsteraAmount, non in ivaAmount
+  "IVA FR 20%": 0,
+  "IVA DE 19%": 0,
+  "IVA AT 20%": 0,
+  "IVA BE 21%": 0,
+};
 const IBKR_ETFS = ["VWCE", "VUAA", "SEC0", "C50", "Altro"];
 const STORAGE_KEY = "iber-silos-v2";
 
@@ -181,17 +197,169 @@ function buildForecast(invoices, movements) {
   return points;
 }
 
-// ── PARSE REVOLUT CSV ─────────────────────────────────────────────────────────
-function parseRevolutCSV(text) {
-  const lines = text.trim().split("\n");
+// ── PARSE REVOLUT PDF ─────────────────────────────────────────────────────────
+// Legge estratto conto Revolut Business in PDF (formato testo nativo, non scansione)
+// Struttura attesa per riga transazione:
+//   "DD mmm YYYY  [TIPO]  Descrizione  [€X.XXX,XX]  [€X.XXX,XX]  €X.XXX,XX"
+// dove il primo importo opzionale è uscita, il secondo entrata, il terzo saldo
+
+async function parseRevolutPDF(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = async (e) => {
+      try {
+        // Usa pdf.js via CDN per estrarre testo dal PDF
+        const pdfjsLib = await loadPdfJs();
+        const typedArray = new Uint8Array(e.target.result);
+        const pdf = await pdfjsLib.getDocument({ data: typedArray }).promise;
+
+        let allText = "";
+        for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
+          const page = await pdf.getPage(pageNum);
+          const content = await page.getTextContent();
+          // Ricostruisce le righe ordinando per posizione Y (top→bottom), poi X
+          const items = content.items
+            .filter(item => item.str.trim())
+            .sort((a, b) => {
+              const yDiff = Math.round(b.transform[5]) - Math.round(a.transform[5]);
+              return yDiff !== 0 ? yDiff : a.transform[4] - b.transform[4];
+            });
+          // Raggruppa per riga (stessa coordinata Y ± 3px)
+          const rows = [];
+          let currentRow = [], lastY = null;
+          for (const item of items) {
+            const y = Math.round(item.transform[5]);
+            if (lastY !== null && Math.abs(y - lastY) > 3) {
+              if (currentRow.length) rows.push(currentRow.join(" "));
+              currentRow = [];
+            }
+            currentRow.push(item.str.trim());
+            lastY = y;
+          }
+          if (currentRow.length) rows.push(currentRow.join(" "));
+          allText += rows.join("\n") + "\n";
+        }
+
+        resolve(parseRevolutText(allText));
+      } catch (err) {
+        reject(new Error("Errore lettura PDF: " + err.message));
+      }
+    };
+    reader.onerror = () => reject(new Error("Errore lettura file"));
+    reader.readAsArrayBuffer(file);
+  });
+}
+
+// Carica pdf.js dinamicamente (evita bundling)
+let _pdfjsLib = null;
+async function loadPdfJs() {
+  if (_pdfjsLib) return _pdfjsLib;
+  return new Promise((resolve, reject) => {
+    const script = document.createElement("script");
+    script.src = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js";
+    script.onload = () => {
+      window.pdfjsLib.GlobalWorkerOptions.workerSrc =
+        "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+      _pdfjsLib = window.pdfjsLib;
+      resolve(_pdfjsLib);
+    };
+    script.onerror = () => reject(new Error("pdf.js non disponibile"));
+    document.head.appendChild(script);
+  });
+}
+
+// Parser del testo estratto dal PDF Revolut Business
+function parseRevolutText(text) {
   const results = [];
-  for (let i = 1; i < lines.length; i++) {
-    const cols = lines[i].split(",").map(c => c.replace(/^"|"$/g, "").trim());
-    if (cols.length < 5) continue;
-    const amount = parseFloat(cols[3]);
-    if (isNaN(amount)) continue;
-    results.push({ id: `imp-${Date.now()}-${i}`, date: cols[0].split(" ")[0], description: cols[1], amount: Math.abs(amount), type: amount >= 0 ? "entrata" : "uscita", account: "Revolut Business", invoiceId: null, reconciled: false, notes: "" });
+
+  // Mappa mesi italiani → numero
+  const MESI = { gen:1,feb:2,mar:3,apr:4,mag:5,giu:6,lug:7,ago:8,set:9,ott:10,nov:11,dic:12 };
+
+  // Regex data: "29 apr 2026" o "09 apr 2026"
+  const reDate = /^(\d{1,2})\s+(gen|feb|mar|apr|mag|giu|lug|ago|set|ott|nov|dic)\s+(\d{4})/i;
+
+  // Regex importo Revolut: "€1.234,56" o "€234,56" o "€10"
+  const reAmt  = /€([\d.]+,\d{2}|[\d]+)/g;
+
+  // Tipi transazione Revolut
+  const TIPOS = /^(MOS|MOA|CAR|FEE|SLD|CRE|CAS|TOP|EXC)\b/;
+
+  const lines = text.split("\n");
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i].trim();
+    const dateMatch = line.match(reDate);
+    if (!dateMatch) continue;
+
+    const day   = dateMatch[1].padStart(2, "0");
+    const month = String(MESI[dateMatch[2].toLowerCase()]).padStart(2, "0");
+    const year  = dateMatch[3];
+    const isoDate = `${year}-${month}-${day}`;
+
+    // Resto della riga dopo la data
+    const rest = line.slice(dateMatch[0].length).trim();
+
+    // Tipo (opzionale, 3 lettere maiuscole)
+    const tipoMatch = rest.match(TIPOS);
+    const tipo = tipoMatch ? tipoMatch[1] : "";
+    const afterTipo = tipoMatch ? rest.slice(tipoMatch[0].length).trim() : rest;
+
+    // Estrae tutti gli importi dalla riga
+    const amts = [];
+    let m;
+    reAmt.lastIndex = 0;
+    while ((m = reAmt.exec(afterTipo)) !== null) {
+      // Converte formato IT "1.234,56" → float
+      const val = parseFloat(m[1].replace(/\./g, "").replace(",", "."));
+      if (!isNaN(val)) amts.push(val);
+    }
+    if (amts.length === 0) continue;
+
+    // Descrizione = testo prima del primo importo
+    const firstAmtIdx = afterTipo.search(/€/);
+    const description = (firstAmtIdx > 0 ? afterTipo.slice(0, firstAmtIdx) : afterTipo)
+      .trim().replace(/\s+/g, " ");
+
+    // Logica importi:
+    // Se 3 importi: [uscita, entrata, saldo] — uno dei primi due è 0 (non compare se vuoto)
+    // Se 2 importi: [importo, saldo]
+    // Se 1 importo: saldo o importo ambiguo
+    // Il tipo MOS/CAR/FEE = uscita, MOA/CRE = entrata
+    let amount = 0;
+    let type = "uscita";
+
+    if (amts.length >= 2) {
+      // Con 3 importi il parser pdf.js a volte collassa uscita+entrata
+      // Usiamo il tipo per discriminare
+      if (tipo === "MOA" || tipo === "CRE") {
+        // Entrata: prendo il valore più grande (saldo è sempre il maggiore di solito)
+        // ma non il saldo — prendo il primo o secondo a seconda del layout
+        amount = amts[0];
+        type   = "entrata";
+      } else {
+        amount = amts[0];
+        type   = "uscita";
+      }
+    } else if (amts.length === 1) {
+      amount = amts[0];
+      type   = (tipo === "MOA" || tipo === "CRE") ? "entrata" : "uscita";
+    }
+
+    if (amount <= 0 || !description) continue;
+
+    results.push({
+      id: `imp-${Date.now()}-${i}`,
+      date: isoDate,
+      description,
+      amount,
+      type,
+      account: "Revolut Business",
+      invoiceId: null,
+      reconciled: false,
+      notes: tipo ? `[${tipo}]` : ""
+    });
   }
+
   return results;
 }
 
@@ -376,7 +544,7 @@ export default function IberSilosApp() {
   const [bimModal, setBimModal] = useState(false);
   const [fattureAperteModal, setFattureAperteModal] = useState(false);
   const fileRef = useRef();
-  const csvRef = useRef();
+  const pdfRef = useRef();
 
   useEffect(() => { loadData().then(d => { setData(d); setLoading(false); }); }, []);
 
@@ -386,7 +554,9 @@ export default function IberSilosApp() {
 
   const saveInvoice = (inv) => {
     const net = parseFloat(inv.netAmount) || 0;
-    const rate = IVA_TYPES[inv.ivaType] ?? 0.21;
+    // Usa rate dalla mappa — se ivaType non è in mappa usa 0.21 solo per fatture ES ordinarie
+    // Per tipi esteri (IVA IT 22% ecc.) la mappa restituisce 0: l'IVA è in ivaEsteraAmount
+    const rate = (inv.ivaType in IVA_TYPES) ? IVA_TYPES[inv.ivaType] : 0.21;
     const ivaAmount = parseFloat((net * rate).toFixed(2));
     const grossAmount = parseFloat((net + ivaAmount).toFixed(2));
     const final = { ...inv, ivaAmount, grossAmount, id: inv.id || `inv-${Date.now()}` };
@@ -459,18 +629,21 @@ export default function IberSilosApp() {
     persist({ ...data, movements, invoices }); setReconcileModal(null); showToast("Riconciliazione salvata");
   };
 
-  const importCSV = (e) => {
+  const importPDF = async (e) => {
     const file = e.target.files[0]; if (!file) return;
-    const reader = new FileReader();
-    reader.onload = (ev) => {
-      const parsed = parseRevolutCSV(ev.target.result);
+    e.target.value = "";
+    showToast("Lettura PDF in corso...", "warn");
+    try {
+      const parsed = await parseRevolutPDF(file);
+      if (!parsed.length) { showToast("Nessuna transazione trovata nel PDF", "err"); return; }
       const existing = new Set(data.movements.map(m => `${m.date}-${m.amount}-${m.description}`));
       const newMovs = parsed.filter(m => !existing.has(`${m.date}-${m.amount}-${m.description}`));
-      if (!newMovs.length) { showToast("Sin nuevos movimientos", "warn"); return; }
+      if (!newMovs.length) { showToast("Sin nuevos movimientos (già importati)", "warn"); return; }
       persist({ ...data, movements: [...data.movements, ...newMovs] });
-      showToast(`Importados ${newMovs.length} movimientos`);
-    };
-    reader.readAsText(file); e.target.value = "";
+      showToast(`✅ Importati ${newMovs.length} movimenti da PDF (${parsed.length - newMovs.length} già presenti)`);
+    } catch (err) {
+      showToast("Errore PDF: " + err.message, "err");
+    }
   };
 
   const exportJSON = () => {
@@ -696,8 +869,8 @@ export default function IberSilosApp() {
               <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:16 }}>
                 <div className="section-title">Movimientos Bancarios</div>
                 <div style={{ display:"flex", gap:8 }}>
-                  <button className="btn-ghost" onClick={() => csvRef.current.click()} style={{ fontSize:11 }}>↑ Import CSV Revolut</button>
-                  <input ref={csvRef} type="file" accept=".csv" onChange={importCSV} style={{ display:"none" }} />
+                  <button className="btn-ghost" onClick={() => pdfRef.current.click()} style={{ fontSize:11 }}>↑ Import PDF Revolut</button>
+                  <input ref={pdfRef} type="file" accept=".pdf" onChange={importPDF} style={{ display:"none" }} />
                   <button className="btn-red" onClick={() => setMovModal({ id:null,date:today(),description:"",amount:"",type:"entrata",account:"Revolut Business",invoiceId:null,reconciled:false,notes:"" })}>+ Movimiento</button>
                 </div>
               </div>
@@ -1421,13 +1594,15 @@ function InvoiceTable({ invoices, onEdit, onDelete }) {
           <table>
             <thead><tr><th>N°</th><th>Fecha</th><th>Venc.</th><th>Tipo</th><th>Contraparte</th><th>Descripción</th><th style={{ textAlign:"right" }}>Base imp.</th><th>IVA</th><th style={{ textAlign:"right" }}>Total</th><th>Stato</th><th></th></tr></thead>
             <tbody>{[...filtered].reverse().map(inv=>{
-              // Fix-3: badge ⚠ per fatture ricevute con IVA ma paese non classificato
+              // Fix-3: badge ⚠ per fatture ricevute con IVA estera non classificata
+              // Segnala se ivaAmount > 0 (IVA ES generica) ma paisIvaOrigen non è stato
+              // impostato esplicitamente — si applica a tutti i fornitori, non solo lista fissa
               const needsIvaClassification =
                 inv.type === "ricevuta" &&
-                (parseFloat(inv.ivaAmount) > 0 || parseFloat(inv.netAmount) > 100) &&
+                (parseFloat(inv.ivaAmount) > 0) &&
                 (!inv.paisIvaOrigen || inv.paisIvaOrigen === "ES") &&
-                // Solo se il fornitore è tipicamente estero
-                (inv.supplier||"").match(/DKV|BMB|CCI|Buzzatti|T-Way|Truck Service/i);
+                // Escludi fornitori chiaramente spagnoli (IVA ES corretto)
+                !(inv.supplier||"").match(/La Clau|Gestrams|Poligon|Brochette|Ruta|Reconquista|Vegallana|Lacamart|Doyouspain/i);
 
               return (
               <tr key={inv.id} style={{ background: needsIvaClassification ? "#fffde7" : undefined }}>
@@ -1510,7 +1685,8 @@ function InvoiceModal({ inv, onSave, onClose }) {
     // Ricalcolo IVA ES (ordinaria, conto 472)
     if (k==="netAmount" || k==="ivaType") {
       const net  = parseFloat(k==="netAmount" ? v : f.netAmount) || 0;
-      const rate = IVA_TYPES_KEYS[k==="ivaType" ? v : f.ivaType] ?? 0.21;
+      const ivaTypeKey = k==="ivaType" ? v : f.ivaType;
+      const rate = (ivaTypeKey in IVA_TYPES_KEYS) ? IVA_TYPES_KEYS[ivaTypeKey] : 0.21;
       updated.ivaAmount   = parseFloat((net * rate).toFixed(2));
       updated.grossAmount = parseFloat((net + updated.ivaAmount).toFixed(2));
     }
