@@ -1,10 +1,9 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
-import { LineChart, Line, BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, ReferenceLine } from "recharts";
+import { LineChart, Line, BarChart, Bar, Cell, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, ReferenceLine } from "recharts";
 
 // ── CONSTANTS ─────────────────────────────────────────────────────────────────
 const CLIENTS = ["Buzzatti", "Coder SA", "Molino dalla Giovanna", "Presta Silo", "Altro"];
-const SUPPLIERS = ["CCI Italia SRLS", "BMB Trasporti", "T-Way (renting)", "La Clau Assessors", "Gestrams", "DKV", "E100", "Altro"];
-const IVA_TYPES = {
+const SUPPLIERS = ["CCI Italia SRLS", "BMB Trasporti", "T-Way (renting)", "La Clau Assessors", "Gestrams", "DKV", "E100", "Altro"];const IVA_TYPES = {
   "21%": 0.21,
   "10%": 0.10,
   "4%": 0.04,
@@ -31,7 +30,6 @@ const AMORT_RATES = { maquinaria: 0.12, equiposInfo: 0.25, vehiculos: 0.16 };
 // €50 per richiesta trimestrale. Usando finestra annuale → soglia €400.
 const IVA_ESTERA_SOGLIA = 400;
 const IVA_FLAGS = { IT:"🇮🇹", FR:"🇫🇷", DE:"🇩🇪", AT:"🇦🇹", BE:"🇧🇪" };
-const IVA_PAESE_CONTI = { IT:"472.IT", FR:"472.FR", DE:"472.DE", AT:"472.AT", BE:"472.BE" };
 // Paesi UE con recupero IVA disponibile per società spagnole (Direttiva 2008/9/CE)
 const PAESI_UE_IVA = [
   { code:"ES", label:"Spagna (IVA ordinaria 303)", flag:"🇪🇸", rate: 0.21 },
@@ -178,6 +176,7 @@ function autoReconcile(movements, invoices) {
 // ── FORECAST ──────────────────────────────────────────────────────────────────
 function buildForecast(invoices, movements) {
   const baseDate = new Date();
+  // Saldo reale = tutti i movimenti cumulati
   const lastBalance = movements.reduce((acc, m) => acc + (m.type === "entrata" ? 1 : -1) * (parseFloat(m.amount) || 0), 0);
   const events = [];
   invoices.forEach(inv => {
@@ -263,7 +262,7 @@ async function loadPdfJs() {
       _pdfjsLib = window.pdfjsLib;
       resolve(_pdfjsLib);
     };
-    script.onerror = () => reject(new Error("pdf.js non disponibile"));
+    script.onerror = () => reject(new Error("pdf.js CDN non raggiungibile. Verifica la connessione internet e riprova."));
     document.head.appendChild(script);
   });
 }
@@ -554,11 +553,14 @@ export default function IberSilosApp() {
 
   const saveInvoice = (inv) => {
     const net = parseFloat(inv.netAmount) || 0;
-    // Usa rate dalla mappa — se ivaType non è in mappa usa 0.21 solo per fatture ES ordinarie
-    // Per tipi esteri (IVA IT 22% ecc.) la mappa restituisce 0: l'IVA è in ivaEsteraAmount
     const rate = (inv.ivaType in IVA_TYPES) ? IVA_TYPES[inv.ivaType] : 0.21;
     const ivaAmount = parseFloat((net * rate).toFixed(2));
-    const grossAmount = parseFloat((net + ivaAmount).toFixed(2));
+    // Per fatture con IVA estera (rate=0) il grossAmount originale va preservato
+    // perché include l'IVA estera che non è in ivaAmount ES
+    const TIPI_ESTERI = ["IVA IT 22%","IVA FR 20%","IVA DE 19%","IVA AT 20%","IVA BE 21%"];
+    const grossAmount = TIPI_ESTERI.includes(inv.ivaType) && parseFloat(inv.grossAmount) > 0
+      ? parseFloat(inv.grossAmount)  // preserva originale
+      : parseFloat((net + ivaAmount).toFixed(2));
     const final = { ...inv, ivaAmount, grossAmount, id: inv.id || `inv-${Date.now()}` };
     if (!final.dueDate) final.dueDate = addDays(final.date, 30);
     // Fix-4: garantisce che i campi IVA estera siano sempre presenti su fatture ricevute
@@ -654,7 +656,17 @@ export default function IberSilosApp() {
   const importJSON = (e) => {
     const file = e.target.files[0]; if (!file) return;
     const reader = new FileReader();
-    reader.onload = (ev) => { try { persist(JSON.parse(ev.target.result)); showToast("Datos importados"); } catch { showToast("Archivo no válido", "err"); } };
+    reader.onload = (ev) => {
+      try {
+        const d = JSON.parse(ev.target.result);
+        // Applica migrazione campi IVA estera su tutte le fatture ricevute
+        if (d.invoices) d.invoices = d.invoices.map(migrateInvoice);
+        persist(d);
+        showToast("Datos importados");
+      } catch {
+        showToast("Archivo no válido", "err");
+      }
+    };
     reader.readAsText(file); e.target.value = "";
   };
 
@@ -675,7 +687,8 @@ export default function IberSilosApp() {
     const costi = ricevute.reduce((s,i)=>s+(parseFloat(i.netAmount)||0),0);
     const creditiAperti = emesse.filter(i=>i.status==="aperta").reduce((s,i)=>s+(parseFloat(i.grossAmount)||0),0);
     const debitiAperti = ricevute.filter(i=>i.status==="aperta").reduce((s,i)=>s+(parseFloat(i.grossAmount)||0),0);
-    const liquidita = mov.reduce((s,m)=>s+(m.type==="entrata"?1:-1)*(parseFloat(m.amount)||0),0);
+    // Liquidità = saldo reale del conto = TUTTI i movimenti cumulati (non solo periodo)
+    const liquidita = data.movements.reduce((s,m)=>s+(m.type==="entrata"?1:-1)*(parseFloat(m.amount)||0),0);
     const ivaSop = ricevute.reduce((s,i)=>s+(parseFloat(i.ivaAmount)||0),0);
     const ivaRep = emesse.reduce((s,i)=>s+(parseFloat(i.ivaAmount)||0),0);
     const ivaCredito = ivaSop - ivaRep;
@@ -1218,8 +1231,14 @@ function DashboardTab({ data, metrics, forecast, ejercicio, EJERCICIOS, bimModal
         const ricevute = inv.filter(i=>i.type==="ricevuta");
 
         // DSO: media giorni tra data fattura e data incasso (solo riconciliate con movimento)
+        // Mappa bidirezionale: movimientoId su fattura OPPURE invoiceId su movimento
         const movMap = {};
         data.movements.forEach(m=>{ if(m.invoiceId) movMap[m.invoiceId]=m.date; });
+        // Aggiunge anche i link dal campo movimientoId sulla fattura
+        data.invoices.forEach(inv=>{ if(inv.movimientoId && !movMap[inv.id]){
+          const mov = data.movements.find(m=>m.id===inv.movimientoId);
+          if(mov) movMap[inv.id]=mov.date;
+        }});
         const dsoCalcs = emesse
           .filter(i=>i.status==="riconciliata" && movMap[i.id])
           .map(i=>Math.max(0, Math.round((new Date(movMap[i.id])-new Date(i.date))/86400000)));
@@ -1323,7 +1342,9 @@ function DashboardTab({ data, metrics, forecast, ejercicio, EJERCICIOS, bimModal
                 <ReferenceLine y={0} stroke="rgba(227,6,19,0.3)" strokeDasharray="4 4" />
                 <Bar dataKey="entrate" fill="#28a745" radius={[3,3,0,0]} />
                 <Bar dataKey="uscite"  fill="#3949ab" radius={[3,3,0,0]} />
-                <Bar dataKey="netto"   fill={(d)=>d.netto>=0?"#E30613":"#ff6b6b"} radius={[3,3,0,0]} />
+                <Bar dataKey="netto" radius={[3,3,0,0]}>
+                  {chartData.map((d,i)=><Cell key={i} fill={d.netto>=0?"#E30613":"#ff6b6b"} />)}
+                </Bar>
               </BarChart>
             </ResponsiveContainer>
             <div style={{ fontSize:10,color:"#bbb",marginTop:6,textAlign:"right" }}>
