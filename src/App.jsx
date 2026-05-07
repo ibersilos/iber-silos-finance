@@ -376,6 +376,7 @@ export default function IberSilosApp() {
   const [bimModal, setBimModal] = useState(false);
   const [fattureAperteModal, setFattureAperteModal] = useState(false);
   const [importConfirmModal, setImportConfirmModal] = useState(null); // { parsed, summary }
+  const [csvImportModal, setCsvImportModal] = useState(null); // { newMovs, duplicates }
   const fileRef = useRef();
   const csvRef = useRef();
 
@@ -468,16 +469,78 @@ export default function IberSilosApp() {
 
   const importCSV = (e) => {
     const file = e.target.files[0]; if (!file) return;
+    e.target.value = "";
     const reader = new FileReader();
     reader.onload = (ev) => {
       const parsed = parseRevolutCSV(ev.target.result);
-      const existing = new Set(data.movements.map(m => `${m.date}-${m.amount}-${m.description}`));
-      const newMovs = parsed.filter(m => !existing.has(`${m.date}-${m.amount}-${m.description}`));
-      if (!newMovs.length) { showToast("Sin nuevos movimientos", "warn"); return; }
-      persist({ ...data, movements: [...data.movements, ...newMovs] });
-      showToast(`Importados ${newMovs.length} movimientos`);
+      if (!parsed.length) { showToast("Nessuna transazione trovata nel CSV", "err"); return; }
+
+      // BUG-3 fix: deduplicazione intelligente
+      // Chiave primaria: data + importo + tipo (non descrizione — Revolut la cambia tra estratti)
+      // Chiave secondaria: descrizione normalizzata (lowercase, spazi normalizzati)
+      const normalizeDesc = (d) => (d||"").toLowerCase().replace(/\s+/g," ").trim();
+
+      // Movimenti esistenti indicizzati
+      const existingByKey  = new Set(data.movements.map(m => `${m.date}-${m.amount}-${m.type}`));
+      const existingByDesc = new Set(data.movements.map(m => `${m.date}-${m.amount}-${normalizeDesc(m.description)}`));
+
+      const newMovs = [];
+      const duplicates = []; // certi duplicati (stessa data+importo+tipo)
+      const possibili  = []; // possibili duplicati (stessa data+importo, desc diversa)
+
+      parsed.forEach(m => {
+        const keyStrict = `${m.date}-${m.amount}-${m.type}`;
+        const keyDesc   = `${m.date}-${m.amount}-${normalizeDesc(m.description)}`;
+
+        if (existingByDesc.has(keyDesc)) {
+          // Stesso giorno, stesso importo, stessa descrizione normalizzata → duplicato certo
+          duplicates.push(m);
+        } else if (existingByKey.has(keyStrict)) {
+          // Stesso giorno, stesso importo, stesso tipo ma desc diversa → possibile duplicato
+          // Aggiungo flag per review manuale
+          possibili.push({ ...m, _possibileDuplicato: true });
+        } else {
+          newMovs.push(m);
+        }
+      });
+
+      if (!newMovs.length && !possibili.length) {
+        showToast(`Nessun movimento nuovo — ${duplicates.length} già presenti`, "warn");
+        return;
+      }
+
+      // Se non ci sono possibili duplicati, importa direttamente
+      if (!possibili.length) {
+        persist({ ...data, movements: [...data.movements, ...newMovs] });
+        showToast(`✓ Importati ${newMovs.length} movimenti · ${duplicates.length} già presenti`);
+        return;
+      }
+
+      // Se ci sono possibili duplicati → mostra modal per review
+      setCsvImportModal({
+        newMovs,
+        duplicates,
+        possibili,
+        // Tutti i possibili selezionati di default (utente deseleziona quelli da escludere)
+        selected: new Set(possibili.map(m => m.id)),
+      });
     };
-    reader.readAsText(file); e.target.value = "";
+    reader.readAsText(file);
+  };
+
+  const confirmCsvImport = (selectedIds) => {
+    if (!csvImportModal) return;
+    const { newMovs, possibili, duplicates } = csvImportModal;
+    const toImport = [
+      ...newMovs,
+      ...possibili.filter(m => selectedIds.has(m.id)).map(m => {
+        const clean = { ...m }; delete clean._possibileDuplicato; return clean;
+      }),
+    ];
+    if (!toImport.length) { showToast("Nessun movimento selezionato", "warn"); setCsvImportModal(null); return; }
+    persist({ ...data, movements: [...data.movements, ...toImport] });
+    setCsvImportModal(null);
+    showToast(`✓ Importati ${toImport.length} movimenti · ${duplicates.length} saltati`);
   };
 
   const exportJSON = () => {
@@ -993,6 +1056,15 @@ export default function IberSilosApp() {
         </div>
       )}
 
+      {/* BUG-3 fix: modal review possibili duplicati CSV */}
+      {csvImportModal && (
+        <CsvImportModal
+          modal={csvImportModal}
+          onConfirm={confirmCsvImport}
+          onClose={()=>setCsvImportModal(null)}
+        />
+      )}
+
       {/* DATA-2 fix: modal conferma import JSON */}
       {importConfirmModal && (
         <div className="modal-overlay" onClick={()=>setImportConfirmModal(null)}>
@@ -1043,6 +1115,101 @@ export default function IberSilosApp() {
 
 
 // ── DASHBOARD TAB ────────────────────────────────────────────────────────────
+// ── CSV IMPORT MODAL ─────────────────────────────────────────────────────────
+function CsvImportModal({ modal, onConfirm, onClose }) {
+  const { newMovs, duplicates, possibili } = modal;
+  const [selected, setSelected] = useState(() => new Set(possibili.map(m => m.id)));
+
+  const toggleAll = (val) => {
+    if (val) setSelected(new Set(possibili.map(m => m.id)));
+    else setSelected(new Set());
+  };
+
+  const toggle = (id) => setSelected(prev => {
+    const next = new Set(prev);
+    next.has(id) ? next.delete(id) : next.add(id);
+    return next;
+  });
+
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal" style={{ maxWidth:620 }} onClick={e=>e.stopPropagation()}>
+        <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:18 }}>
+          <div className="modal-title">⚠️ Possibili duplicati — Verifica prima di importare</div>
+          <button onClick={onClose} style={{ background:"none",fontSize:20,color:"#999" }}>×</button>
+        </div>
+
+        {/* Riepilogo */}
+        <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10,marginBottom:18 }}>
+          <div style={{ background:"#e8f5e9",border:"1.5px solid #a5d6a7",borderRadius:8,padding:"10px 14px",textAlign:"center" }}>
+            <div style={{ fontSize:10,fontWeight:700,color:"#2e7d32",textTransform:"uppercase" }}>Nuovi certi</div>
+            <div style={{ fontSize:22,fontWeight:800,color:"#28a745" }}>{newMovs.length}</div>
+            <div style={{ fontSize:10,color:"#bbb" }}>verranno importati</div>
+          </div>
+          <div style={{ background:"#fff8e1",border:"1.5px solid #ffe082",borderRadius:8,padding:"10px 14px",textAlign:"center" }}>
+            <div style={{ fontSize:10,fontWeight:700,color:"#b8860b",textTransform:"uppercase" }}>Da verificare</div>
+            <div style={{ fontSize:22,fontWeight:800,color:"#b8860b" }}>{possibili.length}</div>
+            <div style={{ fontSize:10,color:"#bbb" }}>stessa data+importo</div>
+          </div>
+          <div style={{ background:"#f5f5f5",border:"1.5px solid #e0e0e0",borderRadius:8,padding:"10px 14px",textAlign:"center" }}>
+            <div style={{ fontSize:10,fontWeight:700,color:"#999",textTransform:"uppercase" }}>Già presenti</div>
+            <div style={{ fontSize:22,fontWeight:800,color:"#999" }}>{duplicates.length}</div>
+            <div style={{ fontSize:10,color:"#bbb" }}>verranno saltati</div>
+          </div>
+        </div>
+
+        {/* Lista possibili duplicati */}
+        <div style={{ fontSize:10,fontWeight:700,letterSpacing:"1.5px",textTransform:"uppercase",color:"#b8860b",marginBottom:10,display:"flex",justifyContent:"space-between",alignItems:"center" }}>
+          <span>Movimenti da verificare — seleziona quelli da importare</span>
+          <div style={{ display:"flex",gap:6 }}>
+            <button className="btn-ghost" style={{ fontSize:10,padding:"3px 8px" }} onClick={()=>toggleAll(true)}>Tutti</button>
+            <button className="btn-ghost" style={{ fontSize:10,padding:"3px 8px" }} onClick={()=>toggleAll(false)}>Nessuno</button>
+          </div>
+        </div>
+        <div style={{ maxHeight:260,overflowY:"auto",border:"1.5px solid #ffe082",borderRadius:8,marginBottom:18 }}>
+          {possibili.map(m => {
+            const isSelected = selected.has(m.id);
+            // Trova il movimento esistente con stessa data+importo
+            return (
+              <div key={m.id}
+                onClick={() => toggle(m.id)}
+                style={{ padding:"10px 14px",borderBottom:"1px solid #F5F5F5",cursor:"pointer",
+                  background: isSelected ? "#fffde7" : "white",
+                  display:"flex",alignItems:"flex-start",gap:10 }}>
+                <input type="checkbox" checked={isSelected} onChange={()=>toggle(m.id)}
+                  style={{ marginTop:2,cursor:"pointer",accentColor:"#b8860b" }} onClick={e=>e.stopPropagation()} />
+                <div style={{ flex:1 }}>
+                  <div style={{ display:"flex",justifyContent:"space-between",marginBottom:3 }}>
+                    <span style={{ fontWeight:700,fontSize:12 }}>{m.date}</span>
+                    <span style={{ fontWeight:800,color:m.type==="entrata"?"#28a745":"#E30613",fontSize:13 }}>
+                      {m.type==="entrata"?"+":"-"}€{m.amount}
+                    </span>
+                  </div>
+                  <div style={{ fontSize:11,color:"#666" }}>
+                    <span style={{ background:"#fff8e1",padding:"1px 6px",borderRadius:3,marginRight:6,fontSize:10,color:"#b8860b",fontWeight:700 }}>CSV</span>
+                    {m.description}
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+
+        <div style={{ background:"#f5f5f5",borderRadius:6,padding:"8px 12px",fontSize:11,color:"#999",marginBottom:16 }}>
+          💡 Deseleziona i movimenti che riconosci come già presenti con descrizione leggermente diversa.
+        </div>
+
+        <div style={{ display:"flex",gap:8 }}>
+          <button className="btn-red" style={{ flex:1 }} onClick={()=>onConfirm(selected)}>
+            ✓ Importa {newMovs.length + selected.size} movimenti
+          </button>
+          <button className="btn-ghost" onClick={onClose}>Annulla</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── IVA ESTERA EXPORT BUTTON ─────────────────────────────────────────────────
 function IvaEsteraExportBtn({ exportIvaEsteraCSV, ejercicio }) {
   const [open, setOpen] = useState(false);
@@ -1177,42 +1344,28 @@ function DashboardTab({ data, metrics, forecast, ejercicio, EJERCICIOS, bimModal
         const ivaByTrim = {};
         trimestri.forEach(t=>{ ivaByTrim[t.id]={IT:0,FR:0,DE:0,AT:0,BE:0,tot:0}; });
 
-        // Fonte primaria: asientos con sottoconti 472.xx
-        const paeseMap = {"472.IT":"IT","472.FR":"FR","472.DE":"DE","472.AT":"AT","472.BE":"BE"};
-        (data.asientos||[]).forEach(asi=>{
-          const d=asi.fecha||"";
-          if(d<ej.from||d>ej.to) return;
-          const mo=parseInt(d.slice(5,7));
-          const t=mo<=3?"T1":mo<=6?"T2":mo<=9?"T3":"T4";
-          (asi.lineas||[]).forEach(l=>{
-            const paese=paeseMap[l.cuenta];
-            if(!paese) return;
-            const v=parseFloat(l.debe||0);
-            if(v>0){ ivaByTrim[t][paese]+=v; ivaByTrim[t].tot+=v; }
-          });
-        });
-
-        // Fonte primaria: campo paisIvaOrigen esplicito sulla fattura (campo aggiunto Step A)
-        // Fonte secondaria: sottoconti contabili 472.IT / 472.FR ecc. (già calcolati sopra)
-        // Keyword-matching su note/descrizione RIMOSSO: inaffidabile per dati fiscali reali.
-        const hasSottoconti = Object.values(ivaByTrim).some(t=>t.tot>0);
-        if(!hasSottoconti){
-          const invEsteri = data.invoices.filter(inv=>{
+        // Fonte canonica: campo paisIvaOrigen + ivaEsteraAmount sulla fattura
+        // Usa fechaOperacion (data competenza fattura) non data pagamento
+        // Gli asientos 472.IT restano per la contabilità ma NON per questo calcolo
+        // — evita disallineamenti data fattura vs data asiento
+        data.invoices
+          .filter(inv=>{
             const d = inv.fechaOperacion||inv.date||"";
             return inv.type==="ricevuta"
               && d>=ej.from && d<=ej.to
-              && inv.paisIvaOrigen                         // campo esplicito obbligatorio
-              && inv.paisIvaOrigen !== "ES"                // ES -> recupero via 303, non UE
-              && (parseFloat(inv.ivaEsteraAmount)||0)>0;  // usa ivaEsteraAmount, non ivaAmount generica
-          });
-          invEsteri.forEach(inv=>{
-            const mo  = parseInt((inv.fechaOperacion||inv.date||"").slice(5,7));
+              && inv.paisIvaOrigen && inv.paisIvaOrigen!=="ES"
+              && (parseFloat(inv.ivaEsteraAmount)||0)>0;
+          })
+          .forEach(inv=>{
+            const d   = inv.fechaOperacion||inv.date||"";
+            const mo  = parseInt(d.slice(5,7));
             const t   = mo<=3?"T1":mo<=6?"T2":mo<=9?"T3":"T4";
             const iva = parseFloat(inv.ivaEsteraAmount)||0;
             const paese = inv.paisIvaOrigen;
-            if(PAESI.includes(paese)){ ivaByTrim[t][paese]+=iva; ivaByTrim[t].tot+=iva; }
+            if(!PAESI.includes(paese)) return;
+            ivaByTrim[t][paese] += iva;
+            ivaByTrim[t].tot    += iva;
           });
-        }
 
         const totAnnuo = {IT:0,FR:0,DE:0,AT:0,BE:0,tot:0};
         Object.values(ivaByTrim).forEach(t=>{ PAESI.forEach(p=>{ totAnnuo[p]+=t[p]; }); totAnnuo.tot+=t.tot; });
