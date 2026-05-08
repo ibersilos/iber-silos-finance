@@ -1,10 +1,25 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
-import { LineChart, Line, BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, ReferenceLine } from "recharts";
+import { LineChart, Line, BarChart, Bar, Cell, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, ReferenceLine } from "recharts";
 
 // ── CONSTANTS ─────────────────────────────────────────────────────────────────
 const CLIENTS = ["Buzzatti", "Coder SA", "Molino dalla Giovanna", "Presta Silo", "Altro"];
-const SUPPLIERS = ["CCI Italia SRLS", "BMB Trasporti", "T-Way (renting)", "La Clau Assessors", "Gestrams", "DKV", "E100", "Altro"];
-const IVA_TYPES = { "21%": 0.21, "RC (reverse charge)": 0, "Esente": 0, "0%": 0 };
+const SUPPLIERS = ["CCI Italia SRLS", "BMB Trasporti", "T-Way (renting)", "La Clau Assessors", "Gestrams", "DKV", "E100", "Altro"];const IVA_TYPES = {
+  "21%": 0.21,
+  "10%": 0.10,
+  "4%": 0.04,
+  "RC (reverse charge)": 0,
+  "RC art.44 Dir.2006/112/CE": 0,
+  "RC art.41 D.L.331/93": 0,
+  "art.25 Ley 37/1992": 0,
+  "Esente": 0,
+  "0%": 0,
+  "NoSujeto": 0,
+  "IVA IT 22%": 0,   // IVA estera IT — il valore recuperabile è in ivaEsteraAmount, non in ivaAmount
+  "IVA FR 20%": 0,
+  "IVA DE 19%": 0,
+  "IVA AT 20%": 0,
+  "IVA BE 21%": 0,
+};
 const IBKR_ETFS = ["VWCE", "VUAA", "SEC0", "C50", "Altro"];
 const STORAGE_KEY = "iber-silos-v2";
 
@@ -15,7 +30,6 @@ const AMORT_RATES = { maquinaria: 0.12, equiposInfo: 0.25, vehiculos: 0.16 };
 // €50 per richiesta trimestrale. Usando finestra annuale → soglia €400.
 const IVA_ESTERA_SOGLIA = 400;
 const IVA_FLAGS = { IT:"🇮🇹", FR:"🇫🇷", DE:"🇩🇪", AT:"🇦🇹", BE:"🇧🇪" };
-const IVA_PAESE_CONTI = { IT:"472.IT", FR:"472.FR", DE:"472.DE", AT:"472.AT", BE:"472.BE" };
 // Paesi UE con recupero IVA disponibile per società spagnole (Direttiva 2008/9/CE)
 const PAESI_UE_IVA = [
   { code:"ES", label:"Spagna (IVA ordinaria 303)", flag:"🇪🇸", rate: 0.21 },
@@ -162,6 +176,7 @@ function autoReconcile(movements, invoices) {
 // ── FORECAST ──────────────────────────────────────────────────────────────────
 function buildForecast(invoices, movements) {
   const baseDate = new Date();
+  // Saldo reale = tutti i movimenti cumulati
   const lastBalance = movements.reduce((acc, m) => acc + (m.type === "entrata" ? 1 : -1) * (parseFloat(m.amount) || 0), 0);
   const events = [];
   invoices.forEach(inv => {
@@ -181,17 +196,169 @@ function buildForecast(invoices, movements) {
   return points;
 }
 
-// ── PARSE REVOLUT CSV ─────────────────────────────────────────────────────────
-function parseRevolutCSV(text) {
-  const lines = text.trim().split("\n");
+// ── PARSE REVOLUT PDF ─────────────────────────────────────────────────────────
+// Legge estratto conto Revolut Business in PDF (formato testo nativo, non scansione)
+// Struttura attesa per riga transazione:
+//   "DD mmm YYYY  [TIPO]  Descrizione  [€X.XXX,XX]  [€X.XXX,XX]  €X.XXX,XX"
+// dove il primo importo opzionale è uscita, il secondo entrata, il terzo saldo
+
+async function parseRevolutPDF(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = async (e) => {
+      try {
+        // Usa pdf.js via CDN per estrarre testo dal PDF
+        const pdfjsLib = await loadPdfJs();
+        const typedArray = new Uint8Array(e.target.result);
+        const pdf = await pdfjsLib.getDocument({ data: typedArray }).promise;
+
+        let allText = "";
+        for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
+          const page = await pdf.getPage(pageNum);
+          const content = await page.getTextContent();
+          // Ricostruisce le righe ordinando per posizione Y (top→bottom), poi X
+          const items = content.items
+            .filter(item => item.str.trim())
+            .sort((a, b) => {
+              const yDiff = Math.round(b.transform[5]) - Math.round(a.transform[5]);
+              return yDiff !== 0 ? yDiff : a.transform[4] - b.transform[4];
+            });
+          // Raggruppa per riga (stessa coordinata Y ± 3px)
+          const rows = [];
+          let currentRow = [], lastY = null;
+          for (const item of items) {
+            const y = Math.round(item.transform[5]);
+            if (lastY !== null && Math.abs(y - lastY) > 3) {
+              if (currentRow.length) rows.push(currentRow.join(" "));
+              currentRow = [];
+            }
+            currentRow.push(item.str.trim());
+            lastY = y;
+          }
+          if (currentRow.length) rows.push(currentRow.join(" "));
+          allText += rows.join("\n") + "\n";
+        }
+
+        resolve(parseRevolutText(allText));
+      } catch (err) {
+        reject(new Error("Errore lettura PDF: " + err.message));
+      }
+    };
+    reader.onerror = () => reject(new Error("Errore lettura file"));
+    reader.readAsArrayBuffer(file);
+  });
+}
+
+// Carica pdf.js dinamicamente (evita bundling)
+let _pdfjsLib = null;
+async function loadPdfJs() {
+  if (_pdfjsLib) return _pdfjsLib;
+  return new Promise((resolve, reject) => {
+    const script = document.createElement("script");
+    script.src = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js";
+    script.onload = () => {
+      window.pdfjsLib.GlobalWorkerOptions.workerSrc =
+        "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+      _pdfjsLib = window.pdfjsLib;
+      resolve(_pdfjsLib);
+    };
+    script.onerror = () => reject(new Error("pdf.js CDN non raggiungibile. Verifica la connessione internet e riprova."));
+    document.head.appendChild(script);
+  });
+}
+
+// Parser del testo estratto dal PDF Revolut Business
+function parseRevolutText(text) {
   const results = [];
-  for (let i = 1; i < lines.length; i++) {
-    const cols = lines[i].split(",").map(c => c.replace(/^"|"$/g, "").trim());
-    if (cols.length < 5) continue;
-    const amount = parseFloat(cols[3]);
-    if (isNaN(amount)) continue;
-    results.push({ id: `imp-${Date.now()}-${i}`, date: cols[0].split(" ")[0], description: cols[1], amount: Math.abs(amount), type: amount >= 0 ? "entrata" : "uscita", account: "Revolut Business", invoiceId: null, reconciled: false, notes: "" });
+
+  // Mappa mesi italiani → numero
+  const MESI = { gen:1,feb:2,mar:3,apr:4,mag:5,giu:6,lug:7,ago:8,set:9,ott:10,nov:11,dic:12 };
+
+  // Regex data: "29 apr 2026" o "09 apr 2026"
+  const reDate = /^(\d{1,2})\s+(gen|feb|mar|apr|mag|giu|lug|ago|set|ott|nov|dic)\s+(\d{4})/i;
+
+  // Regex importo Revolut: "€1.234,56" o "€234,56" o "€10"
+  const reAmt  = /€([\d.]+,\d{2}|[\d]+)/g;
+
+  // Tipi transazione Revolut
+  const TIPOS = /^(MOS|MOA|CAR|FEE|SLD|CRE|CAS|TOP|EXC)\b/;
+
+  const lines = text.split("\n");
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i].trim();
+    const dateMatch = line.match(reDate);
+    if (!dateMatch) continue;
+
+    const day   = dateMatch[1].padStart(2, "0");
+    const month = String(MESI[dateMatch[2].toLowerCase()]).padStart(2, "0");
+    const year  = dateMatch[3];
+    const isoDate = `${year}-${month}-${day}`;
+
+    // Resto della riga dopo la data
+    const rest = line.slice(dateMatch[0].length).trim();
+
+    // Tipo (opzionale, 3 lettere maiuscole)
+    const tipoMatch = rest.match(TIPOS);
+    const tipo = tipoMatch ? tipoMatch[1] : "";
+    const afterTipo = tipoMatch ? rest.slice(tipoMatch[0].length).trim() : rest;
+
+    // Estrae tutti gli importi dalla riga
+    const amts = [];
+    let m;
+    reAmt.lastIndex = 0;
+    while ((m = reAmt.exec(afterTipo)) !== null) {
+      // Converte formato IT "1.234,56" → float
+      const val = parseFloat(m[1].replace(/\./g, "").replace(",", "."));
+      if (!isNaN(val)) amts.push(val);
+    }
+    if (amts.length === 0) continue;
+
+    // Descrizione = testo prima del primo importo
+    const firstAmtIdx = afterTipo.search(/€/);
+    const description = (firstAmtIdx > 0 ? afterTipo.slice(0, firstAmtIdx) : afterTipo)
+      .trim().replace(/\s+/g, " ");
+
+    // Logica importi:
+    // Se 3 importi: [uscita, entrata, saldo] — uno dei primi due è 0 (non compare se vuoto)
+    // Se 2 importi: [importo, saldo]
+    // Se 1 importo: saldo o importo ambiguo
+    // Il tipo MOS/CAR/FEE = uscita, MOA/CRE = entrata
+    let amount = 0;
+    let type = "uscita";
+
+    if (amts.length >= 2) {
+      // Con 3 importi il parser pdf.js a volte collassa uscita+entrata
+      // Usiamo il tipo per discriminare
+      if (tipo === "MOA" || tipo === "CRE") {
+        // Entrata: prendo il valore più grande (saldo è sempre il maggiore di solito)
+        // ma non il saldo — prendo il primo o secondo a seconda del layout
+        amount = amts[0];
+        type   = "entrata";
+      } else {
+        amount = amts[0];
+        type   = "uscita";
+      }
+    } else if (amts.length === 1) {
+      amount = amts[0];
+      type   = (tipo === "MOA" || tipo === "CRE") ? "entrata" : "uscita";
+    }
+
+    if (amount <= 0 || !description) continue;
+
+    results.push({
+      id: `imp-${Date.now()}-${i}`,
+      date: isoDate,
+      description,
+      amount,
+      type,
+      account: "Revolut Business",
+      invoiceId: null,
+      reconciled: false,
+      notes: tipo ? `[${tipo}]` : ""
+    });
   }
+
   return results;
 }
 
@@ -374,11 +541,10 @@ export default function IberSilosApp() {
   const [mayorCuenta, setMayorCuenta] = useState("572");
   const [ejercicio, setEjercicio] = useState("EF2");
   const [bimModal, setBimModal] = useState(false);
+  const [aeatModal, setAeatModal] = useState(false);
   const [fattureAperteModal, setFattureAperteModal] = useState(false);
-  const [importConfirmModal, setImportConfirmModal] = useState(null); // { parsed, summary }
-  const [csvImportModal, setCsvImportModal] = useState(null); // { newMovs, duplicates }
   const fileRef = useRef();
-  const csvRef = useRef();
+  const pdfRef = useRef();
 
   useEffect(() => { loadData().then(d => { setData(d); setLoading(false); }); }, []);
 
@@ -388,9 +554,14 @@ export default function IberSilosApp() {
 
   const saveInvoice = (inv) => {
     const net = parseFloat(inv.netAmount) || 0;
-    const rate = IVA_TYPES[inv.ivaType] ?? 0.21;
+    const rate = (inv.ivaType in IVA_TYPES) ? IVA_TYPES[inv.ivaType] : 0.21;
     const ivaAmount = parseFloat((net * rate).toFixed(2));
-    const grossAmount = parseFloat((net + ivaAmount).toFixed(2));
+    // Per fatture con IVA estera (rate=0) il grossAmount originale va preservato
+    // perché include l'IVA estera che non è in ivaAmount ES
+    const TIPI_ESTERI = ["IVA IT 22%","IVA FR 20%","IVA DE 19%","IVA AT 20%","IVA BE 21%"];
+    const grossAmount = TIPI_ESTERI.includes(inv.ivaType) && parseFloat(inv.grossAmount) > 0
+      ? parseFloat(inv.grossAmount)  // preserva originale
+      : parseFloat((net + ivaAmount).toFixed(2));
     const final = { ...inv, ivaAmount, grossAmount, id: inv.id || `inv-${Date.now()}` };
     if (!final.dueDate) final.dueDate = addDays(final.date, 30);
     // Fix-4: garantisce che i campi IVA estera siano sempre presenti su fatture ricevute
@@ -440,13 +611,7 @@ export default function IberSilosApp() {
     const totalHaber = lineas.reduce((s,l) => s+(parseFloat(l.haber)||0), 0);
     if (Math.abs(totalDebe - totalHaber) > 0.01) { showToast(` No cuadra: D ${fmt(totalDebe)} ≠ H ${fmt(totalHaber)}`, "err"); return; }
     const asientos = data.asientos || [];
-    // LOGIC-4 fix: numero basato su max esistente, non su length
-    // evita duplicati quando si eliminano asientos nel mezzo
-    const maxNumero = asientos.reduce((max, a) => {
-      const n = parseInt(a.numero) || 0;
-      return n > max ? n : max;
-    }, 0);
-    const numero = asiento.numero || String(maxNumero + 1).padStart(4, "0");
+    const numero = asiento.numero || String(asientos.length + 1).padStart(4, "0");
     const final = { ...asiento, lineas, numero, id: asiento.id || `asi-${Date.now()}` };
     const exists = asientos.find(a => a.id === final.id);
     persist({ ...data, asientos: exists ? asientos.map(a => a.id===final.id?final:a) : [...asientos, final] });
@@ -467,80 +632,21 @@ export default function IberSilosApp() {
     persist({ ...data, movements, invoices }); setReconcileModal(null); showToast("Riconciliazione salvata");
   };
 
-  const importCSV = (e) => {
+  const importPDF = async (e) => {
     const file = e.target.files[0]; if (!file) return;
     e.target.value = "";
-    const reader = new FileReader();
-    reader.onload = (ev) => {
-      const parsed = parseRevolutCSV(ev.target.result);
-      if (!parsed.length) { showToast("Nessuna transazione trovata nel CSV", "err"); return; }
-
-      // BUG-3 fix: deduplicazione intelligente
-      // Chiave primaria: data + importo + tipo (non descrizione — Revolut la cambia tra estratti)
-      // Chiave secondaria: descrizione normalizzata (lowercase, spazi normalizzati)
-      const normalizeDesc = (d) => (d||"").toLowerCase().replace(/\s+/g," ").trim();
-
-      // Movimenti esistenti indicizzati
-      const existingByKey  = new Set(data.movements.map(m => `${m.date}-${m.amount}-${m.type}`));
-      const existingByDesc = new Set(data.movements.map(m => `${m.date}-${m.amount}-${normalizeDesc(m.description)}`));
-
-      const newMovs = [];
-      const duplicates = []; // certi duplicati (stessa data+importo+tipo)
-      const possibili  = []; // possibili duplicati (stessa data+importo, desc diversa)
-
-      parsed.forEach(m => {
-        const keyStrict = `${m.date}-${m.amount}-${m.type}`;
-        const keyDesc   = `${m.date}-${m.amount}-${normalizeDesc(m.description)}`;
-
-        if (existingByDesc.has(keyDesc)) {
-          // Stesso giorno, stesso importo, stessa descrizione normalizzata → duplicato certo
-          duplicates.push(m);
-        } else if (existingByKey.has(keyStrict)) {
-          // Stesso giorno, stesso importo, stesso tipo ma desc diversa → possibile duplicato
-          // Aggiungo flag per review manuale
-          possibili.push({ ...m, _possibileDuplicato: true });
-        } else {
-          newMovs.push(m);
-        }
-      });
-
-      if (!newMovs.length && !possibili.length) {
-        showToast(`Nessun movimento nuovo — ${duplicates.length} già presenti`, "warn");
-        return;
-      }
-
-      // Se non ci sono possibili duplicati, importa direttamente
-      if (!possibili.length) {
-        persist({ ...data, movements: [...data.movements, ...newMovs] });
-        showToast(`✓ Importati ${newMovs.length} movimenti · ${duplicates.length} già presenti`);
-        return;
-      }
-
-      // Se ci sono possibili duplicati → mostra modal per review
-      setCsvImportModal({
-        newMovs,
-        duplicates,
-        possibili,
-        // Tutti i possibili selezionati di default (utente deseleziona quelli da escludere)
-        selected: new Set(possibili.map(m => m.id)),
-      });
-    };
-    reader.readAsText(file);
-  };
-
-  const confirmCsvImport = (selectedIds) => {
-    if (!csvImportModal) return;
-    const { newMovs, possibili, duplicates } = csvImportModal;
-    const toImport = [
-      ...newMovs,
-      ...possibili.filter(m => selectedIds.has(m.id)).map(m => {
-        const clean = { ...m }; delete clean._possibileDuplicato; return clean;
-      }),
-    ];
-    if (!toImport.length) { showToast("Nessun movimento selezionato", "warn"); setCsvImportModal(null); return; }
-    persist({ ...data, movements: [...data.movements, ...toImport] });
-    setCsvImportModal(null);
-    showToast(`✓ Importati ${toImport.length} movimenti · ${duplicates.length} saltati`);
+    showToast("Lettura PDF in corso...", "warn");
+    try {
+      const parsed = await parseRevolutPDF(file);
+      if (!parsed.length) { showToast("Nessuna transazione trovata nel PDF", "err"); return; }
+      const existing = new Set(data.movements.map(m => `${m.date}-${m.amount}-${m.description}`));
+      const newMovs = parsed.filter(m => !existing.has(`${m.date}-${m.amount}-${m.description}`));
+      if (!newMovs.length) { showToast("Sin nuevos movimientos (già importati)", "warn"); return; }
+      persist({ ...data, movements: [...data.movements, ...newMovs] });
+      showToast(`✅ Importati ${newMovs.length} movimenti da PDF (${parsed.length - newMovs.length} già presenti)`);
+    } catch (err) {
+      showToast("Errore PDF: " + err.message, "err");
+    }
   };
 
   const exportJSON = () => {
@@ -550,144 +656,19 @@ export default function IberSilosApp() {
   };
   const importJSON = (e) => {
     const file = e.target.files[0]; if (!file) return;
-    e.target.value = "";
     const reader = new FileReader();
     reader.onload = (ev) => {
       try {
-        const parsed = JSON.parse(ev.target.result);
-        // DATA-2 fix: validazione schema minima prima di sovrascrivere
-        const errors = [];
-        if (!parsed || typeof parsed !== "object") errors.push("Il file non è un oggetto JSON valido");
-        if (!Array.isArray(parsed?.invoices))   errors.push("Campo 'invoices' mancante o non è un array");
-        if (!Array.isArray(parsed?.movements))  errors.push("Campo 'movements' mancante o non è un array");
-        if (!Array.isArray(parsed?.asientos))   errors.push("Campo 'asientos' mancante o non è un array");
-        if (errors.length > 0) {
-          showToast("❌ File non valido: " + errors[0], "err");
-          return;
-        }
-        // Applica migrazione campi IVA estera
-        if (parsed.invoices) parsed.invoices = parsed.invoices.map(migrateInvoice);
-        // Mostra modal di conferma con riepilogo dati
-        const summary = {
-          invoices:   parsed.invoices?.length || 0,
-          movements:  parsed.movements?.length || 0,
-          asientos:   parsed.asientos?.length || 0,
-          ibkr:       parsed.ibkrPositions?.length || 0,
-          assets:     parsed.fixedAssets?.length || 0,
-          currentInv: data.invoices?.length || 0,
-          currentMov: data.movements?.length || 0,
-          currentAsi: data.asientos?.length || 0,
-        };
-        setImportConfirmModal({ parsed, summary });
-      } catch (err) {
-        showToast("❌ Archivo no válido: " + err.message, "err");
+        const d = JSON.parse(ev.target.result);
+        // Applica migrazione campi IVA estera su tutte le fatture ricevute
+        if (d.invoices) d.invoices = d.invoices.map(migrateInvoice);
+        persist(d);
+        showToast("Datos importados");
+      } catch {
+        showToast("Archivo no válido", "err");
       }
     };
-    reader.readAsText(file);
-  };
-
-  const confirmImport = () => {
-    if (!importConfirmModal) return;
-    persist(importConfirmModal.parsed);
-    setImportConfirmModal(null);
-    const s = importConfirmModal.summary;
-    showToast(`✓ Importati: ${s.invoices} fatture · ${s.movements} movimenti · ${s.asientos} asientos`);
-  };
-
-  const exportIvaEsteraCSV = (trimestre) => {
-    const ej = EJERCICIOS.find(e=>e.id===ejercicio)||EJERCICIOS[1];
-    // Anno dal from dell'ejercicio
-    const anno = ej.from.slice(0,4);
-    // Mesi del trimestre selezionato
-    const mesiMap = { T1:[1,2,3], T2:[4,5,6], T3:[7,8,9], T4:[10,11,12] };
-    const mesi = mesiMap[trimestre];
-    const scadenzeMap = { T1:`30/04/${anno}`, T2:`31/07/${anno}`, T3:`31/10/${anno}`, T4:`31/01/${parseInt(anno)+1}` };
-
-    // Filtra fatture ricevute del trimestre con IVA estera
-    const fatture = data.invoices.filter(inv => {
-      if (inv.type !== "ricevuta") return false;
-      if (!inv.paisIvaOrigen || inv.paisIvaOrigen === "ES") return false;
-      if (!(parseFloat(inv.ivaEsteraAmount) > 0)) return false;
-      const d = inv.fechaOperacion || inv.date || "";
-      if (!d) return false;
-      const mo = parseInt(d.slice(5,7));
-      return mesi.includes(mo) && d >= ej.from && d <= ej.to;
-    }).sort((a,b) => {
-      // Ordina per paese poi per data
-      const pa = a.paisIvaOrigen || "ZZ";
-      const pb = b.paisIvaOrigen || "ZZ";
-      if (pa !== pb) return pa.localeCompare(pb);
-      return (a.date||"").localeCompare(b.date||"");
-    });
-
-    if (fatture.length === 0) {
-      showToast(`Nessuna fattura con IVA estera in ${trimestre} ${anno}`, "warn");
-      return;
-    }
-
-    // Header CSV
-    const cols = [
-      "Trimestre",
-      "N° Fattura",
-      "Data Fattura",
-      "Fornitore",
-      "P.IVA Estera Fornitore",
-      "Paese",
-      "Base Imponibile Estera (EUR)",
-      "Aliquota (%)",
-      "IVA Recuperabile (EUR)",
-      "Descrizione",
-      "Link Documento",
-      "Scadenza Richiesta",
-    ];
-
-    const rows = [cols];
-    let totaleIva = 0;
-
-    fatture.forEach(inv => {
-      const paeseInfo = PAESI_UE_IVA.find(p => p.code === inv.paisIvaOrigen);
-      const ivaAmt = parseFloat(inv.ivaEsteraAmount) || 0;
-      totaleIva += ivaAmt;
-      rows.push([
-        `${trimestre} ${anno}`,
-        inv.number || "",
-        inv.date ? new Date(inv.date).toLocaleDateString("it-IT") : "",
-        inv.supplier || "",
-        inv.vatForeignNumber || "",
-        paeseInfo ? `${paeseInfo.flag} ${paeseInfo.label}` : inv.paisIvaOrigen,
-        (parseFloat(inv.ivaEsteraBase) || 0).toFixed(2).replace(".", ","),
-        ((parseFloat(inv.ivaEsteraRate) || 0) * 100).toFixed(0) + "%",
-        ivaAmt.toFixed(2).replace(".", ","),
-        inv.description || "",
-        inv.dropboxLink || inv.driveFileId || "",
-        scadenzeMap[trimestre],
-      ]);
-    });
-
-    // Riga totale
-    rows.push([]);
-    rows.push([
-      `TOTALE ${trimestre} ${anno}`, "", "", "", "", "",
-      fatture.reduce((s,i) => s+(parseFloat(i.ivaEsteraBase)||0), 0).toFixed(2).replace(".",","),
-      "",
-      totaleIva.toFixed(2).replace(".",","),
-      `${fatture.length} fatture`,
-      "",
-      scadenzeMap[trimestre],
-    ]);
-
-    // Genera CSV con separatore ;
-    const csv = rows.map(r =>
-      r.map(v => `"${String(v||"").replace(/"/g, '""')}"`).join(";")
-    ).join("\n");
-
-    // BOM per Excel ES/IT
-    const blob = new Blob(["\uFEFF" + csv], { type: "text/csv;charset=utf-8;" });
-    const a = document.createElement("a");
-    a.href = URL.createObjectURL(blob);
-    a.download = `IberSilos_IVA_Estera_${ej.id}_${trimestre}_${anno}.csv`;
-    a.click();
-    showToast(`✓ Export ${trimestre} ${anno} — ${fatture.length} fatture, IVA totale €${totaleIva.toFixed(2)}`);
+    reader.readAsText(file); e.target.value = "";
   };
 
   const exportContabCSV = () => {
@@ -707,8 +688,7 @@ export default function IberSilosApp() {
     const costi = ricevute.reduce((s,i)=>s+(parseFloat(i.netAmount)||0),0);
     const creditiAperti = emesse.filter(i=>i.status==="aperta").reduce((s,i)=>s+(parseFloat(i.grossAmount)||0),0);
     const debitiAperti = ricevute.filter(i=>i.status==="aperta").reduce((s,i)=>s+(parseFloat(i.grossAmount)||0),0);
-    // LOGIC-1 fix: liquidità reale = saldo cumulato di TUTTI i movimenti storici
-    // non filtrata per ejercicio — rappresenta il saldo reale del conto oggi
+    // Liquidità = saldo reale del conto = TUTTI i movimenti cumulati (non solo periodo)
     const liquidita = data.movements.reduce((s,m)=>s+(m.type==="entrata"?1:-1)*(parseFloat(m.amount)||0),0);
     const ivaSop = ricevute.reduce((s,i)=>s+(parseFloat(i.ivaAmount)||0),0);
     const ivaRep = emesse.reduce((s,i)=>s+(parseFloat(i.ivaAmount)||0),0);
@@ -883,7 +863,7 @@ export default function IberSilosApp() {
         </aside>
 
         <div style={{ flex:1, overflowY:"auto", padding:24, scrollBehavior:"smooth" }}>
-          {tab==="dashboard" && <DashboardTab data={data} metrics={metrics} forecast={forecast} ejercicio={ejercicio} EJERCICIOS={EJERCICIOS} bimModal={bimModal} setBimModal={setBimModal} exportIvaEsteraCSV={exportIvaEsteraCSV} />}
+          {tab==="dashboard" && <DashboardTab data={data} metrics={metrics} forecast={forecast} ejercicio={ejercicio} EJERCICIOS={EJERCICIOS} bimModal={bimModal} setBimModal={setBimModal} aeatModal={aeatModal} setAeatModal={setAeatModal} />}
 
           {tab==="fatture" && (
             <div>
@@ -903,8 +883,8 @@ export default function IberSilosApp() {
               <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:16 }}>
                 <div className="section-title">Movimientos Bancarios</div>
                 <div style={{ display:"flex", gap:8 }}>
-                  <button className="btn-ghost" onClick={() => csvRef.current.click()} style={{ fontSize:11 }}>↑ Import CSV Revolut</button>
-                  <input ref={csvRef} type="file" accept=".csv" onChange={importCSV} style={{ display:"none" }} />
+                  <button className="btn-ghost" onClick={() => pdfRef.current.click()} style={{ fontSize:11 }}>↑ Import PDF Revolut</button>
+                  <input ref={pdfRef} type="file" accept=".pdf" onChange={importPDF} style={{ display:"none" }} />
                   <button className="btn-red" onClick={() => setMovModal({ id:null,date:today(),description:"",amount:"",type:"entrata",account:"Revolut Business",invoiceId:null,reconciled:false,notes:"" })}>+ Movimiento</button>
                 </div>
               </div>
@@ -1017,6 +997,7 @@ export default function IberSilosApp() {
       )}
       {asientoModal && <AsientoModal asiento={asientoModal} onSave={saveAsiento} onClose={()=>setAsientoModal(null)} />}
 
+      {aeatModal && <AeatModal data={data} ejercicio={ejercicio} EJERCICIOS={EJERCICIOS} onClose={()=>setAeatModal(false)} />}
       {bimModal && (
         <div className="modal-overlay" onClick={()=>setBimModal(false)}>
           <div className="modal" style={{ maxWidth:580 }} onClick={e=>e.stopPropagation()}>
@@ -1056,54 +1037,6 @@ export default function IberSilosApp() {
         </div>
       )}
 
-      {/* BUG-3 fix: modal review possibili duplicati CSV */}
-      {csvImportModal && (
-        <CsvImportModal
-          modal={csvImportModal}
-          onConfirm={confirmCsvImport}
-          onClose={()=>setCsvImportModal(null)}
-        />
-      )}
-
-      {/* DATA-2 fix: modal conferma import JSON */}
-      {importConfirmModal && (
-        <div className="modal-overlay" onClick={()=>setImportConfirmModal(null)}>
-          <div className="modal" style={{ maxWidth:480 }} onClick={e=>e.stopPropagation()}>
-            <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:18 }}>
-              <div className="modal-title">⚠️ Conferma Import JSON</div>
-              <button onClick={()=>setImportConfirmModal(null)} style={{ background:"none",fontSize:20,color:"#999" }}>×</button>
-            </div>
-            <div style={{ background:"#fff8e1",border:"1.5px solid #ffe082",borderRadius:8,padding:"12px 14px",marginBottom:16,fontSize:12,color:"#b8860b",fontWeight:600 }}>
-              Stai per sovrascrivere tutti i dati attuali. Questa azione non è reversibile.
-            </div>
-            <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:18 }}>
-              <div style={{ background:"#ffebee",border:"1.5px solid #ef9a9a",borderRadius:8,padding:"10px 14px" }}>
-                <div style={{ fontSize:10,fontWeight:700,color:"#c62828",letterSpacing:"0.1em",textTransform:"uppercase",marginBottom:8 }}>Dati attuali (verranno persi)</div>
-                <div style={{ fontSize:12,color:"#666" }}>📄 {importConfirmModal.summary.currentInv} fatture</div>
-                <div style={{ fontSize:12,color:"#666" }}>💳 {importConfirmModal.summary.currentMov} movimenti</div>
-                <div style={{ fontSize:12,color:"#666" }}>📒 {importConfirmModal.summary.currentAsi} asientos</div>
-              </div>
-              <div style={{ background:"#e8f5e9",border:"1.5px solid #a5d6a7",borderRadius:8,padding:"10px 14px" }}>
-                <div style={{ fontSize:10,fontWeight:700,color:"#2e7d32",letterSpacing:"0.1em",textTransform:"uppercase",marginBottom:8 }}>Dati nel file (verranno caricati)</div>
-                <div style={{ fontSize:12,color:"#666" }}>📄 {importConfirmModal.summary.invoices} fatture</div>
-                <div style={{ fontSize:12,color:"#666" }}>💳 {importConfirmModal.summary.movements} movimenti</div>
-                <div style={{ fontSize:12,color:"#666" }}>📒 {importConfirmModal.summary.asientos} asientos</div>
-                {importConfirmModal.summary.ibkr>0 && <div style={{ fontSize:12,color:"#666" }}>📈 {importConfirmModal.summary.ibkr} posizioni IBKR</div>}
-                {importConfirmModal.summary.assets>0 && <div style={{ fontSize:12,color:"#666" }}>🔧 {importConfirmModal.summary.assets} asset</div>}
-              </div>
-            </div>
-            <div style={{ display:"flex",gap:8 }}>
-              <button className="btn-red" style={{ flex:1 }} onClick={confirmImport}>
-                ✓ Sì, importa e sovrascrivi
-              </button>
-              <button className="btn-ghost" style={{ flex:1 }} onClick={()=>setImportConfirmModal(null)}>
-                Annulla
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
       {toast && (
         <div style={{ position:"fixed",bottom:24,right:24,background:toast.type==="err"?"#ffebee":toast.type==="warn"?"#fffde7":"#e8f5e9",border:`1.5px solid ${toast.type==="err"?"#ef9a9a":toast.type==="warn"?"#ffe082":"#a5d6a7"}`,color:toast.type==="err"?"#c62828":toast.type==="warn"?"#b8860b":"#2e7d32",padding:"12px 20px",borderRadius:10,fontSize:13,fontWeight:600,zIndex:200,boxShadow:"0 4px 20px rgba(0,0,0,0.1)" }}>
           {toast.msg}
@@ -1115,157 +1048,7 @@ export default function IberSilosApp() {
 
 
 // ── DASHBOARD TAB ────────────────────────────────────────────────────────────
-// ── CSV IMPORT MODAL ─────────────────────────────────────────────────────────
-function CsvImportModal({ modal, onConfirm, onClose }) {
-  const { newMovs, duplicates, possibili } = modal;
-  const [selected, setSelected] = useState(() => new Set(possibili.map(m => m.id)));
-
-  const toggleAll = (val) => {
-    if (val) setSelected(new Set(possibili.map(m => m.id)));
-    else setSelected(new Set());
-  };
-
-  const toggle = (id) => setSelected(prev => {
-    const next = new Set(prev);
-    next.has(id) ? next.delete(id) : next.add(id);
-    return next;
-  });
-
-  return (
-    <div className="modal-overlay" onClick={onClose}>
-      <div className="modal" style={{ maxWidth:620 }} onClick={e=>e.stopPropagation()}>
-        <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:18 }}>
-          <div className="modal-title">⚠️ Possibili duplicati — Verifica prima di importare</div>
-          <button onClick={onClose} style={{ background:"none",fontSize:20,color:"#999" }}>×</button>
-        </div>
-
-        {/* Riepilogo */}
-        <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10,marginBottom:18 }}>
-          <div style={{ background:"#e8f5e9",border:"1.5px solid #a5d6a7",borderRadius:8,padding:"10px 14px",textAlign:"center" }}>
-            <div style={{ fontSize:10,fontWeight:700,color:"#2e7d32",textTransform:"uppercase" }}>Nuovi certi</div>
-            <div style={{ fontSize:22,fontWeight:800,color:"#28a745" }}>{newMovs.length}</div>
-            <div style={{ fontSize:10,color:"#bbb" }}>verranno importati</div>
-          </div>
-          <div style={{ background:"#fff8e1",border:"1.5px solid #ffe082",borderRadius:8,padding:"10px 14px",textAlign:"center" }}>
-            <div style={{ fontSize:10,fontWeight:700,color:"#b8860b",textTransform:"uppercase" }}>Da verificare</div>
-            <div style={{ fontSize:22,fontWeight:800,color:"#b8860b" }}>{possibili.length}</div>
-            <div style={{ fontSize:10,color:"#bbb" }}>stessa data+importo</div>
-          </div>
-          <div style={{ background:"#f5f5f5",border:"1.5px solid #e0e0e0",borderRadius:8,padding:"10px 14px",textAlign:"center" }}>
-            <div style={{ fontSize:10,fontWeight:700,color:"#999",textTransform:"uppercase" }}>Già presenti</div>
-            <div style={{ fontSize:22,fontWeight:800,color:"#999" }}>{duplicates.length}</div>
-            <div style={{ fontSize:10,color:"#bbb" }}>verranno saltati</div>
-          </div>
-        </div>
-
-        {/* Lista possibili duplicati */}
-        <div style={{ fontSize:10,fontWeight:700,letterSpacing:"1.5px",textTransform:"uppercase",color:"#b8860b",marginBottom:10,display:"flex",justifyContent:"space-between",alignItems:"center" }}>
-          <span>Movimenti da verificare — seleziona quelli da importare</span>
-          <div style={{ display:"flex",gap:6 }}>
-            <button className="btn-ghost" style={{ fontSize:10,padding:"3px 8px" }} onClick={()=>toggleAll(true)}>Tutti</button>
-            <button className="btn-ghost" style={{ fontSize:10,padding:"3px 8px" }} onClick={()=>toggleAll(false)}>Nessuno</button>
-          </div>
-        </div>
-        <div style={{ maxHeight:260,overflowY:"auto",border:"1.5px solid #ffe082",borderRadius:8,marginBottom:18 }}>
-          {possibili.map(m => {
-            const isSelected = selected.has(m.id);
-            // Trova il movimento esistente con stessa data+importo
-            return (
-              <div key={m.id}
-                onClick={() => toggle(m.id)}
-                style={{ padding:"10px 14px",borderBottom:"1px solid #F5F5F5",cursor:"pointer",
-                  background: isSelected ? "#fffde7" : "white",
-                  display:"flex",alignItems:"flex-start",gap:10 }}>
-                <input type="checkbox" checked={isSelected} onChange={()=>toggle(m.id)}
-                  style={{ marginTop:2,cursor:"pointer",accentColor:"#b8860b" }} onClick={e=>e.stopPropagation()} />
-                <div style={{ flex:1 }}>
-                  <div style={{ display:"flex",justifyContent:"space-between",marginBottom:3 }}>
-                    <span style={{ fontWeight:700,fontSize:12 }}>{m.date}</span>
-                    <span style={{ fontWeight:800,color:m.type==="entrata"?"#28a745":"#E30613",fontSize:13 }}>
-                      {m.type==="entrata"?"+":"-"}€{m.amount}
-                    </span>
-                  </div>
-                  <div style={{ fontSize:11,color:"#666" }}>
-                    <span style={{ background:"#fff8e1",padding:"1px 6px",borderRadius:3,marginRight:6,fontSize:10,color:"#b8860b",fontWeight:700 }}>CSV</span>
-                    {m.description}
-                  </div>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-
-        <div style={{ background:"#f5f5f5",borderRadius:6,padding:"8px 12px",fontSize:11,color:"#999",marginBottom:16 }}>
-          💡 Deseleziona i movimenti che riconosci come già presenti con descrizione leggermente diversa.
-        </div>
-
-        <div style={{ display:"flex",gap:8 }}>
-          <button className="btn-red" style={{ flex:1 }} onClick={()=>onConfirm(selected)}>
-            ✓ Importa {newMovs.length + selected.size} movimenti
-          </button>
-          <button className="btn-ghost" onClick={onClose}>Annulla</button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// ── IVA ESTERA EXPORT BUTTON ─────────────────────────────────────────────────
-function IvaEsteraExportBtn({ exportIvaEsteraCSV, ejercicio }) {
-  const [open, setOpen] = useState(false);
-  const ej = EJERCICIOS.find(e=>e.id===ejercicio)||EJERCICIOS[1];
-  const anno = ej.from.slice(0,4);
-  const trimestri = [
-    { id:"T1", label:`T1 ${anno}`, scad:`30/04/${anno}` },
-    { id:"T2", label:`T2 ${anno}`, scad:`31/07/${anno}` },
-    { id:"T3", label:`T3 ${anno}`, scad:`31/10/${anno}` },
-    { id:"T4", label:`T4 ${anno}`, scad:`31/01/${parseInt(anno)+1}` },
-  ];
-
-  return (
-    <div style={{ position:"relative" }}>
-      <button
-        className="btn-ghost"
-        style={{ fontSize:11, background:"#fffde7", borderColor:"#ffe082", color:"#b8860b", fontWeight:700 }}
-        onClick={() => setOpen(o => !o)}
-      >
-        ↓ Export CSV Hacienda
-      </button>
-      {open && (
-        <div style={{
-          position:"absolute", top:"100%", right:0, marginTop:4,
-          background:"white", border:"1.5px solid #ffe082", borderRadius:8,
-          boxShadow:"0 4px 20px rgba(0,0,0,0.12)", zIndex:50, minWidth:200, overflow:"hidden"
-        }}>
-          <div style={{ fontSize:9,fontWeight:700,letterSpacing:"1.5px",textTransform:"uppercase",color:"#bbb",padding:"8px 14px 4px" }}>
-            Seleziona trimestre
-          </div>
-          {trimestri.map(t => (
-            <button key={t.id} onClick={() => { exportIvaEsteraCSV(t.id); setOpen(false); }}
-              style={{
-                display:"block", width:"100%", textAlign:"left",
-                padding:"10px 14px", background:"white", border:"none",
-                borderBottom:"1px solid #F5F5F5", cursor:"pointer",
-                fontSize:12, fontWeight:600, color:"#1A1A1A",
-              }}
-              onMouseEnter={e => e.currentTarget.style.background="#fffde7"}
-              onMouseLeave={e => e.currentTarget.style.background="white"}
-            >
-              <span style={{ fontWeight:800, color:"#b8860b", marginRight:8 }}>{t.id}</span>
-              {t.label}
-              <span style={{ float:"right", fontSize:10, color:"#bbb", fontWeight:400 }}>scad. {t.scad}</span>
-            </button>
-          ))}
-          <div style={{ padding:"8px 14px", fontSize:10, color:"#bbb", borderTop:"1px solid #F5F5F5" }}>
-            CSV con separatore ; · per La Clau Assessors
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
-function DashboardTab({ data, metrics, forecast, ejercicio, EJERCICIOS, bimModal, setBimModal, exportIvaEsteraCSV }) {
+function DashboardTab({ data, metrics, forecast, ejercicio, EJERCICIOS, bimModal, setBimModal, aeatModal, setAeatModal }) {
   return (
     <div>
       <div className="section-title" style={{ marginBottom:20 }}>Panoramica</div>
@@ -1285,10 +1068,13 @@ function DashboardTab({ data, metrics, forecast, ejercicio, EJERCICIOS, bimModal
         return (
           <div className="card" style={{ marginBottom:16 }}>
             <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14 }}>
-              <div style={{ fontSize:10,fontWeight:700,letterSpacing:"1.5px",textTransform:"uppercase",color:"#bbb" }}>IVA — REDEME</div>
-              <span style={{ background:isCredito?"#e8f5e9":"#ffebee",border:`1.5px solid ${isCredito?"#a5d6a7":"#ef9a9a"}`,borderRadius:6,padding:"4px 12px",fontSize:12,fontWeight:800,color:isCredito?"#2e7d32":"#E30613" }}>
-                {isCredito?"✓ Crédito":"⚠ Deuda"}: {fmt(Math.abs(ivaCredito))}
-              </span>
+              <div style={{ fontSize:10,fontWeight:700,letterSpacing:"1.5px",textTransform:"uppercase",color:"#bbb" }}>IVA — REDEME (solo ES)</div>
+              <div style={{ display:"flex",gap:8,alignItems:"center" }}>
+                <button className="btn-ghost" style={{ fontSize:11 }} onClick={()=>setAeatModal(true)}>📊 Detalle AEAT →</button>
+                <span style={{ background:isCredito?"#e8f5e9":"#ffebee",border:`1.5px solid ${isCredito?"#a5d6a7":"#ef9a9a"}`,borderRadius:6,padding:"4px 12px",fontSize:12,fontWeight:800,color:isCredito?"#2e7d32":"#E30613" }}>
+                  {isCredito?"✓ Crédito":"⚠ Deuda"}: {fmt(Math.abs(ivaCredito))}
+                </span>
+              </div>
             </div>
             <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:12,marginBottom:12 }}>
               <div style={{ textAlign:"center" }}>
@@ -1344,28 +1130,42 @@ function DashboardTab({ data, metrics, forecast, ejercicio, EJERCICIOS, bimModal
         const ivaByTrim = {};
         trimestri.forEach(t=>{ ivaByTrim[t.id]={IT:0,FR:0,DE:0,AT:0,BE:0,tot:0}; });
 
-        // Fonte canonica: campo paisIvaOrigen + ivaEsteraAmount sulla fattura
-        // Usa fechaOperacion (data competenza fattura) non data pagamento
-        // Gli asientos 472.IT restano per la contabilità ma NON per questo calcolo
-        // — evita disallineamenti data fattura vs data asiento
-        data.invoices
-          .filter(inv=>{
+        // Fonte primaria: asientos con sottoconti 472.xx
+        const paeseMap = {"472.IT":"IT","472.FR":"FR","472.DE":"DE","472.AT":"AT","472.BE":"BE"};
+        (data.asientos||[]).forEach(asi=>{
+          const d=asi.fecha||"";
+          if(d<ej.from||d>ej.to) return;
+          const mo=parseInt(d.slice(5,7));
+          const t=mo<=3?"T1":mo<=6?"T2":mo<=9?"T3":"T4";
+          (asi.lineas||[]).forEach(l=>{
+            const paese=paeseMap[l.cuenta];
+            if(!paese) return;
+            const v=parseFloat(l.debe||0);
+            if(v>0){ ivaByTrim[t][paese]+=v; ivaByTrim[t].tot+=v; }
+          });
+        });
+
+        // Fonte primaria: campo paisIvaOrigen esplicito sulla fattura (campo aggiunto Step A)
+        // Fonte secondaria: sottoconti contabili 472.IT / 472.FR ecc. (già calcolati sopra)
+        // Keyword-matching su note/descrizione RIMOSSO: inaffidabile per dati fiscali reali.
+        const hasSottoconti = Object.values(ivaByTrim).some(t=>t.tot>0);
+        if(!hasSottoconti){
+          const invEsteri = data.invoices.filter(inv=>{
             const d = inv.fechaOperacion||inv.date||"";
             return inv.type==="ricevuta"
               && d>=ej.from && d<=ej.to
-              && inv.paisIvaOrigen && inv.paisIvaOrigen!=="ES"
-              && (parseFloat(inv.ivaEsteraAmount)||0)>0;
-          })
-          .forEach(inv=>{
-            const d   = inv.fechaOperacion||inv.date||"";
-            const mo  = parseInt(d.slice(5,7));
+              && inv.paisIvaOrigen                         // campo esplicito obbligatorio
+              && inv.paisIvaOrigen !== "ES"                // ES -> recupero via 303, non UE
+              && (parseFloat(inv.ivaEsteraAmount)||0)>0;  // usa ivaEsteraAmount, non ivaAmount generica
+          });
+          invEsteri.forEach(inv=>{
+            const mo  = parseInt((inv.fechaOperacion||inv.date||"").slice(5,7));
             const t   = mo<=3?"T1":mo<=6?"T2":mo<=9?"T3":"T4";
             const iva = parseFloat(inv.ivaEsteraAmount)||0;
             const paese = inv.paisIvaOrigen;
-            if(!PAESI.includes(paese)) return;
-            ivaByTrim[t][paese] += iva;
-            ivaByTrim[t].tot    += iva;
+            if(PAESI.includes(paese)){ ivaByTrim[t][paese]+=iva; ivaByTrim[t].tot+=iva; }
           });
+        }
 
         const totAnnuo = {IT:0,FR:0,DE:0,AT:0,BE:0,tot:0};
         Object.values(ivaByTrim).forEach(t=>{ PAESI.forEach(p=>{ totAnnuo[p]+=t[p]; }); totAnnuo.tot+=t.tot; });
@@ -1374,10 +1174,7 @@ function DashboardTab({ data, metrics, forecast, ejercicio, EJERCICIOS, bimModal
           <div className="card" style={{ marginBottom:16, borderLeft:"4px solid #F5C800" }}>
             <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14 }}>
               <div style={{ fontSize:10,fontWeight:700,letterSpacing:"1.5px",textTransform:"uppercase",color:"#bbb" }}>Recupero IVA Estera — Pratica Diretta</div>
-              <div style={{ display:"flex",gap:6,alignItems:"center" }}>
-                <IvaEsteraExportBtn exportIvaEsteraCSV={exportIvaEsteraCSV} ejercicio={ejercicio} />
-                <button className="btn-ghost" style={{ fontSize:11 }} onClick={()=>setBimModal(true)}>Dettaglio →</button>
-              </div>
+              <button className="btn-ghost" style={{ fontSize:11 }} onClick={()=>setBimModal(true)}>Dettaglio →</button>
             </div>
             <div style={{ display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:8,marginBottom:14 }}>
               {trimestri.map(t=>{
@@ -1430,64 +1227,429 @@ function DashboardTab({ data, metrics, forecast, ejercicio, EJERCICIOS, bimModal
         );
       })()}
 
-      {/* ── GRAFICO MENSILE ── */}
+      {/* ── PANNELLO 1: CICLO DI CASSA (DSO / DPO) ── */}
       {(() => {
         const ej = EJERCICIOS.find(e=>e.id===ejercicio)||EJERCICIOS[2];
-        const byMonth = {};
-        data.invoices.forEach(inv => {
-          const d = inv.fechaOperacion || inv.date || "";
-          if (!d || d < ej.from || d > ej.to) return;
-          const m = d.slice(0,7);
-          if (!byMonth[m]) byMonth[m] = { month: m.slice(5)+"/"+m.slice(2,4), attive: 0, passive: 0 };
-          if (inv.type === "emessa")   byMonth[m].attive  += parseFloat(inv.netAmount)||0;
-          if (inv.type === "ricevuta") byMonth[m].passive += parseFloat(inv.netAmount)||0;
-        });
-        const chartData = Object.values(byMonth).sort((a,b)=>a.month.localeCompare(b.month));
-        if (!chartData.length) return null;
+        const todayStr = new Date().toISOString().split("T")[0];
+        const inv = data.invoices.filter(i=>{ const d=i.fechaOperacion||i.date||""; return d>=ej.from&&d<=ej.to; });
+        const emesse   = inv.filter(i=>i.type==="emessa");
+        const ricevute = inv.filter(i=>i.type==="ricevuta");
+
+        // DSO: media giorni tra data fattura e data incasso (solo riconciliate con movimento)
+        // Mappa bidirezionale: movimientoId su fattura OPPURE invoiceId su movimento
+        const movMap = {};
+        data.movements.forEach(m=>{ if(m.invoiceId) movMap[m.invoiceId]=m.date; });
+        // Aggiunge anche i link dal campo movimientoId sulla fattura
+        data.invoices.forEach(inv=>{ if(inv.movimientoId && !movMap[inv.id]){
+          const mov = data.movements.find(m=>m.id===inv.movimientoId);
+          if(mov) movMap[inv.id]=mov.date;
+        }});
+        const dsoCalcs = emesse
+          .filter(i=>i.status==="riconciliata" && movMap[i.id])
+          .map(i=>Math.max(0, Math.round((new Date(movMap[i.id])-new Date(i.date))/86400000)));
+        const dso = dsoCalcs.length ? Math.round(dsoCalcs.reduce((a,b)=>a+b,0)/dsoCalcs.length) : null;
+
+        // DPO: media giorni tra data fattura ricevuta e data pagamento
+        const dpoCalcs = ricevute
+          .filter(i=>i.status==="riconciliata" && movMap[i.id])
+          .map(i=>Math.max(0, Math.round((new Date(movMap[i.id])-new Date(i.date))/86400000)));
+        const dpo = dpoCalcs.length ? Math.round(dpoCalcs.reduce((a,b)=>a+b,0)/dpoCalcs.length) : null;
+
+        // Crediti scaduti: fatture emesse aperte con dueDate < oggi
+        const scaduti = emesse.filter(i=>i.status==="aperta" && i.dueDate && i.dueDate < todayStr);
+        const totScaduti = scaduti.reduce((s,i)=>s+(parseFloat(i.grossAmount)||0),0);
+        const maxScaduto = scaduti.length
+          ? Math.max(...scaduti.map(i=>Math.round((new Date(todayStr)-new Date(i.dueDate))/86400000)))
+          : 0;
+
+        // Concentrazione clienti: % Buzzatti su fatturato
+        const fatTot = emesse.reduce((s,i)=>s+(parseFloat(i.netAmount)||0),0);
+        const fatBuzz = emesse.filter(i=>(i.client||"").includes("Buzzatti")).reduce((s,i)=>s+(parseFloat(i.netAmount)||0),0);
+        const concBuzz = fatTot > 0 ? (fatBuzz/fatTot*100) : 0;
+
         return (
-          <div className="card" style={{ marginBottom:16 }}>
-            <div style={{ fontSize:10,fontWeight:700,letterSpacing:"1.5px",textTransform:"uppercase",color:"#bbb",marginBottom:16 }}>Fatturato mensile — Attivo vs Passivo</div>
-            <div style={{ display:"flex",gap:16,marginBottom:10,fontSize:11 }}>
-              <span style={{ display:"flex",alignItems:"center",gap:5 }}><span style={{ width:12,height:12,background:"#E30613",borderRadius:2,display:"inline-block" }}/> Facturas emitidas</span>
-              <span style={{ display:"flex",alignItems:"center",gap:5 }}><span style={{ width:12,height:12,background:"#3949ab",borderRadius:2,display:"inline-block" }}/> Facturas recibidas</span>
-              <span style={{ display:"flex",alignItems:"center",gap:5 }}><span style={{ width:12,height:12,background:"#28a745",borderRadius:2,display:"inline-block" }}/> Margine</span>
+          <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:14, marginBottom:16 }}>
+            {/* DSO */}
+            <div className="card" style={{ borderLeft:`4px solid ${dso>30?"#E30613":"#28a745"}` }}>
+              <div className="kpi-label">DSO — Giorni incasso</div>
+              <div className="kpi-value" style={{ color: dso===null?"#bbb":dso>30?"#E30613":"#28a745", fontSize:28 }}>
+                {dso===null?"—":`${dso}gg`}
+              </div>
+              <div style={{ fontSize:11,color:"#999",marginTop:4 }}>
+                {dso===null?"Nessuna fattura riconciliata":dso<=30?"✓ Sotto 30 giorni":dso<=45?"⚠ Attenzione":"🔴 Alto rischio liquidità"}
+              </div>
+              <div style={{ fontSize:10,color:"#bbb",marginTop:2 }}>Su {dsoCalcs.length} fatture riconciliate</div>
             </div>
-            <ResponsiveContainer width="100%" height={220}>
-              <BarChart data={chartData} barGap={4} barCategoryGap="25%">
-                <CartesianGrid strokeDasharray="3 3" stroke="#F5F5F5" vertical={false} />
-                <XAxis dataKey="month" tick={{ fontSize:10,fill:"#bbb" }} axisLine={false} tickLine={false} />
-                <YAxis tick={{ fontSize:10,fill:"#bbb" }} tickFormatter={v=>v>=1000?`${(v/1000).toFixed(0)}k`:`${v}`} axisLine={false} tickLine={false} />
-                <Tooltip contentStyle={{ background:"white",border:"1.5px solid #E0E0E0",borderRadius:8,fontSize:12 }} formatter={(v,n)=>[fmt(v), n==="attive"?"Emitidas":n==="passive"?"Recibidas":"Margen"]} />
-                <Bar dataKey="attive"  fill="#E30613" radius={[4,4,0,0]} />
-                <Bar dataKey="passive" fill="#3949ab" radius={[4,4,0,0]} />
-                <Bar dataKey={(row)=>Math.max(0,row.attive-row.passive)} name="margine" fill="#28a745" radius={[4,4,0,0]} />
-              </BarChart>
-            </ResponsiveContainer>
+
+            {/* DPO */}
+            <div className="card" style={{ borderLeft:`4px solid ${dpo>45?"#E30613":dpo>30?"#b8860b":"#3949ab"}` }}>
+              <div className="kpi-label">DPO — Giorni pagamento</div>
+              <div className="kpi-value" style={{ color:"#3949ab", fontSize:28 }}>
+                {dpo===null?"—":`${dpo}gg`}
+              </div>
+              <div style={{ fontSize:11,color:"#999",marginTop:4 }}>
+                {dpo===null?"Nessun pagamento":dso!==null&&dso>dpo?"⚠ Incassi più lenti dei pagamenti":"✓ Ciclo bilanciato"}
+              </div>
+              <div style={{ fontSize:10,color:"#bbb",marginTop:2 }}>Su {dpoCalcs.length} fatture pagate</div>
+            </div>
+
+            {/* Concentrazione */}
+            <div className="card" style={{ borderLeft:`4px solid ${concBuzz>90?"#E30613":concBuzz>70?"#b8860b":"#28a745"}` }}>
+              <div className="kpi-label">Concentrazione Buzzatti</div>
+              <div className="kpi-value" style={{ color:concBuzz>90?"#E30613":"#b8860b", fontSize:28 }}>
+                {concBuzz.toFixed(0)}%
+              </div>
+              <div style={{ fontSize:11,color:"#999",marginTop:4 }}>
+                {concBuzz>90?"🔴 Rischio mono-cliente elevato":concBuzz>70?"⚠ Diversificare urgente":"✓ Ok"}
+              </div>
+              <div style={{ fontSize:10,color:"#bbb",marginTop:2 }}>{fmt(fatBuzz)} su {fmt(fatTot)}</div>
+            </div>
           </div>
         );
       })()}
 
-      <div className="card">
-        <div style={{ fontSize:10, fontWeight:700, letterSpacing:"1.5px", textTransform:"uppercase", color:"#bbb", marginBottom:12 }}>Últimas facturas</div>
-        {data.invoices.length===0 ? <div style={{ color:"#bbb", fontSize:13 }}>Sin facturas todavía.</div> :
-          <table><thead><tr><th>N°</th><th>Fecha</th><th>Tipo</th><th>Contraparte</th><th>Base imp.</th><th>Stato</th></tr></thead>
-          <tbody>{data.invoices.slice(-8).reverse().map(inv=>(
-            <tr key={inv.id}>
-              <td style={{ fontWeight:700, color:"#E30613" }}>{inv.number||"—"}</td>
-              <td>{fmtDate(inv.date)}</td>
-              <td><span className={`badge ${inv.type==="emessa"?"badge-green":"badge-yellow"}`}>{inv.type}</span></td>
-              <td>{inv.type==="emessa"?inv.client:inv.supplier}</td>
-              <td style={{ fontWeight:600 }}>{fmt(inv.netAmount)}</td>
-              <td><StatusBadge status={inv.status}/></td>
-            </tr>
-          ))}</tbody></table>
-        }
+      {/* ── PANNELLO 2: CASH FLOW REALE DAL BANCO (mensile) ── */}
+      {(() => {
+        if (!data.movements.length) return null;
+        const ej = EJERCICIOS.find(e=>e.id===ejercicio)||EJERCICIOS[2];
+        const byMonth = {};
+        data.movements
+          .filter(m=>{ const d=m.date||""; return d>=ej.from&&d<=ej.to; })
+          .forEach(m=>{
+            const mo = m.date.slice(0,7);
+            if (!byMonth[mo]) byMonth[mo] = { month:m.date.slice(5,7)+"/"+m.date.slice(2,4), entrate:0, uscite:0 };
+            if (m.type==="entrata") byMonth[mo].entrate += parseFloat(m.amount)||0;
+            else                    byMonth[mo].uscite  += parseFloat(m.amount)||0;
+          });
+        const chartData = Object.values(byMonth)
+          .sort((a,b)=>a.month.localeCompare(b.month))
+          .map(d=>({ ...d, netto: d.entrate - d.uscite }));
+        if (!chartData.length) return null;
+        return (
+          <div className="card" style={{ marginBottom:16 }}>
+            <div style={{ fontSize:10,fontWeight:700,letterSpacing:"1.5px",textTransform:"uppercase",color:"#bbb",marginBottom:14 }}>
+              Cash Flow Banco — Mensile reale (movimenti Revolut)
+            </div>
+            <div style={{ display:"flex",gap:16,marginBottom:10,fontSize:11 }}>
+              <span style={{ display:"flex",alignItems:"center",gap:5 }}><span style={{ width:12,height:12,background:"#28a745",borderRadius:2,display:"inline-block" }}/> Entrate</span>
+              <span style={{ display:"flex",alignItems:"center",gap:5 }}><span style={{ width:12,height:12,background:"#3949ab",borderRadius:2,display:"inline-block" }}/> Uscite</span>
+              <span style={{ display:"flex",alignItems:"center",gap:5 }}><span style={{ width:12,height:12,background:"#E30613",borderRadius:2,display:"inline-block" }}/> Netto</span>
+            </div>
+            <ResponsiveContainer width="100%" height={200}>
+              <BarChart data={chartData} barGap={2} barCategoryGap="20%">
+                <CartesianGrid strokeDasharray="3 3" stroke="#F5F5F5" vertical={false} />
+                <XAxis dataKey="month" tick={{ fontSize:11,fill:"#bbb" }} axisLine={false} tickLine={false} />
+                <YAxis tick={{ fontSize:10,fill:"#bbb" }} tickFormatter={v=>v>=1000?`${(v/1000).toFixed(0)}k`:`${v}`} axisLine={false} tickLine={false} />
+                <Tooltip
+                  contentStyle={{ background:"white",border:"1.5px solid #E0E0E0",borderRadius:8,fontSize:12 }}
+                  formatter={(v,n)=>[fmt(v), n==="entrate"?"Entrate":n==="uscite"?"Uscite":"Netto"]}
+                />
+                <ReferenceLine y={0} stroke="rgba(227,6,19,0.3)" strokeDasharray="4 4" />
+                <Bar dataKey="entrate" fill="#28a745" radius={[3,3,0,0]} />
+                <Bar dataKey="uscite"  fill="#3949ab" radius={[3,3,0,0]} />
+                <Bar dataKey="netto" radius={[3,3,0,0]}>
+                  {chartData.map((d,i)=><Cell key={i} fill={d.netto>=0?"#E30613":"#ff6b6b"} />)}
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+            <div style={{ fontSize:10,color:"#bbb",marginTop:6,textAlign:"right" }}>
+              Dati reali da estratto conto Revolut Business — non competenza contabile
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* ── PANNELLO 3: CREDITI SCADUTI ── */}
+      {(() => {
+        const todayStr = new Date().toISOString().split("T")[0];
+        const scaduti = data.invoices
+          .filter(i=>i.type==="emessa" && i.status==="aperta" && i.dueDate && i.dueDate < todayStr)
+          .map(i=>({ ...i, giorniScaduto: Math.round((new Date(todayStr)-new Date(i.dueDate))/86400000) }))
+          .sort((a,b)=>b.giorniScaduto-a.giorniScaduto);
+        const aperteNonScadute = data.invoices.filter(i=>i.type==="emessa"&&i.status==="aperta"&&(!i.dueDate||i.dueDate>=todayStr));
+        if (!scaduti.length && !aperteNonScadute.length) return null;
+        return (
+          <div className="card" style={{ marginBottom:16 }}>
+            <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14 }}>
+              <div style={{ fontSize:10,fontWeight:700,letterSpacing:"1.5px",textTransform:"uppercase",color:"#bbb" }}>
+                Crediti — Scaduto e in scadenza
+              </div>
+              {scaduti.length>0 && (
+                <span style={{ background:"#ffebee",border:"1.5px solid #ef9a9a",borderRadius:6,padding:"4px 12px",fontSize:12,fontWeight:800,color:"#E30613" }}>
+                  🔴 {fmt(scaduti.reduce((s,i)=>s+(parseFloat(i.grossAmount)||0),0))} scaduto
+                </span>
+              )}
+            </div>
+            <table>
+              <thead><tr><th>N°</th><th>Cliente</th><th>Scadenza</th><th style={{ textAlign:"right" }}>Giorni</th><th style={{ textAlign:"right" }}>Importo</th><th>Stato</th></tr></thead>
+              <tbody>
+                {scaduti.map(inv=>(
+                  <tr key={inv.id} style={{ background:"#fff5f5" }}>
+                    <td style={{ fontWeight:700,color:"#E30613" }}>{inv.number||"—"}</td>
+                    <td style={{ fontWeight:600 }}>{inv.client||"—"}</td>
+                    <td style={{ color:"#E30613",fontWeight:700 }}>{fmtDate(inv.dueDate)}</td>
+                    <td style={{ textAlign:"right",fontWeight:800,color:"#E30613" }}>+{inv.giorniScaduto}gg</td>
+                    <td style={{ textAlign:"right",fontWeight:700 }}>{fmt(inv.grossAmount)}</td>
+                    <td><span className="badge badge-red">scaduta</span></td>
+                  </tr>
+                ))}
+                {aperteNonScadute.map(inv=>{
+                  const gg = inv.dueDate ? Math.round((new Date(inv.dueDate)-new Date(todayStr))/86400000) : null;
+                  return (
+                    <tr key={inv.id}>
+                      <td style={{ fontWeight:700,color:"#E30613" }}>{inv.number||"—"}</td>
+                      <td style={{ fontWeight:600 }}>{inv.client||"—"}</td>
+                      <td style={{ color:"#999" }}>{fmtDate(inv.dueDate)}</td>
+                      <td style={{ textAlign:"right",color:gg!==null&&gg<=7?"#b8860b":"#bbb" }}>{gg!==null?`${gg}gg`:"—"}</td>
+                      <td style={{ textAlign:"right",fontWeight:700 }}>{fmt(inv.grossAmount)}</td>
+                      <td><span className="badge badge-yellow">aperta</span></td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        );
+      })()}
+
+      {/* ── PANNELLO 4: ESPOSIZIONE SUBVETTORI ── */}
+      {(() => {
+        const ej = EJERCICIOS.find(e=>e.id===ejercicio)||EJERCICIOS[2];
+        const ricevute = data.invoices.filter(i=>{
+          const d=i.fechaOperacion||i.date||"";
+          return i.type==="ricevuta" && d>=ej.from && d<=ej.to;
+        });
+        // Raggruppa per fornitore
+        const bySupp = {};
+        ricevute.forEach(i=>{
+          const s = i.supplier || "Altro";
+          if (!bySupp[s]) bySupp[s] = { supplier:s, totale:0, aperte:0, pagato:0 };
+          const net = parseFloat(i.netAmount)||0;
+          bySupp[s].totale += net;
+          if (i.status==="aperta") bySupp[s].aperte += parseFloat(i.grossAmount)||0;
+          else bySupp[s].pagato += net;
+        });
+        const rows = Object.values(bySupp).sort((a,b)=>b.totale-a.totale).slice(0,6);
+        if (!rows.length) return null;
+        const totale = rows.reduce((s,r)=>s+r.totale,0);
+        return (
+          <div className="card">
+            <div style={{ fontSize:10,fontWeight:700,letterSpacing:"1.5px",textTransform:"uppercase",color:"#bbb",marginBottom:14 }}>
+              Esposizione fornitori — {EJERCICIOS.find(e=>e.id===ejercicio)?.label}
+            </div>
+            <table>
+              <thead><tr><th>Fornitore</th><th style={{ textAlign:"right" }}>Totale costi</th><th style={{ textAlign:"right" }}>% su totale</th><th style={{ textAlign:"right" }}>Ancora aperto</th></tr></thead>
+              <tbody>
+                {rows.map(r=>(
+                  <tr key={r.supplier}>
+                    <td style={{ fontWeight:600 }}>{r.supplier}</td>
+                    <td style={{ textAlign:"right" }}>{fmt(r.totale)}</td>
+                    <td style={{ textAlign:"right" }}>
+                      <div style={{ display:"flex",alignItems:"center",justifyContent:"flex-end",gap:8 }}>
+                        <div style={{ width:60,height:4,background:"#F5F5F5",borderRadius:2 }}>
+                          <div style={{ width:`${Math.min(r.totale/totale*100,100)}%`,height:"100%",background:"#3949ab",borderRadius:2 }} />
+                        </div>
+                        <span style={{ fontSize:11,color:"#999" }}>{(r.totale/totale*100).toFixed(0)}%</span>
+                      </div>
+                    </td>
+                    <td style={{ textAlign:"right",fontWeight:r.aperte>0?700:400,color:r.aperte>0?"#E30613":"#bbb" }}>
+                      {r.aperte>0?fmt(r.aperte):"—"}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        );
+      })()}
+    </div>
+  );
+}
+
+// ── AEAT MODAL — IVA ES pura (Modelo 303 / REDEME) ──────────────────────────
+function AeatModal({ data, ejercicio, EJERCICIOS, onClose }) {
+  const ej = EJERCICIOS.find(e=>e.id===ejercicio)||EJERCICIOS[2];
+
+  // Solo fatture con IVA ES (paisIvaOrigen==="ES" o non classificate come estere)
+  const invES = data.invoices.filter(inv=>{
+    const d = inv.fechaOperacion||inv.date||"";
+    if(d<ej.from||d>ej.to) return false;
+    const isEstera = inv.paisIvaOrigen && inv.paisIvaOrigen !== "ES";
+    return !isEstera;
+  });
+
+  const emesseES   = invES.filter(i=>i.type==="emessa");
+  const ricevuteES = invES.filter(i=>i.type==="ricevuta");
+
+  // IVA ES per trimestre
+  const trimestri = ["Q1","Q2","Q3","Q4"];
+  const byTrim = {};
+  trimestri.forEach(t=>{ byTrim[t]={ soportado:0, repercutido:0, devuelto:0, fatture:[] }; });
+
+  const getTrim = (d) => {
+    const mo = parseInt(d.slice(5,7));
+    return mo<=3?"Q1":mo<=6?"Q2":mo<=9?"Q3":"Q4";
+  };
+
+  ricevuteES.forEach(inv=>{
+    const d = inv.fechaOperacion||inv.date||"";
+    const t = getTrim(d);
+    const iva = parseFloat(inv.ivaAmount||0);
+    if(iva>0){ byTrim[t].soportado+=iva; byTrim[t].fatture.push(inv); }
+  });
+  emesseES.forEach(inv=>{
+    const d = inv.fechaOperacion||inv.date||"";
+    const t = getTrim(d);
+    const iva = parseFloat(inv.ivaAmount||0);
+    if(iva>0) byTrim[t].repercutido+=iva;
+  });
+
+  // Rimborsi AEAT ricevuti (movimenti entrata con "AEAT" nella descrizione)
+  data.movements.forEach(m=>{
+    if(m.type==="entrata" && (m.description||"").toUpperCase().includes("AEAT")){
+      const d = m.date||"";
+      if(d>=ej.from&&d<=ej.to){
+        const t = getTrim(d);
+        byTrim[t].devuelto += parseFloat(m.amount||0);
+      }
+    }
+  });
+
+  // Saldo cumulato (contatore che somma e resta)
+  let saldoCumulato = 0;
+  const rows = trimestri.map(t=>{
+    const { soportado, repercutido, devuelto } = byTrim[t];
+    const credito303 = soportado - repercutido;  // positivo = credito AEAT
+    saldoCumulato += credito303 - devuelto;
+    return { trim:t, soportado, repercutido, credito303, devuelto, saldoCumulato };
+  });
+
+  const totSop   = rows.reduce((s,r)=>s+r.soportado,0);
+  const totRep   = rows.reduce((s,r)=>s+r.repercutido,0);
+  const totDevol = rows.reduce((s,r)=>s+r.devuelto,0);
+  const saldoFinale = rows[rows.length-1].saldoCumulato;
+
+  // Fatture ES con IVA soportada (per dettaglio)
+  const fatES = ricevuteES.filter(i=>parseFloat(i.ivaAmount||0)>0)
+    .sort((a,b)=>(a.fechaOperacion||a.date||"").localeCompare(b.fechaOperacion||b.date||""));
+
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal" style={{ maxWidth:700 }} onClick={e=>e.stopPropagation()}>
+        {/* Header */}
+        <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20 }}>
+          <div>
+            <div className="modal-title">📊 IVA España — Modelo 303 / REDEME</div>
+            <div style={{ fontSize:11,color:"#bbb",marginTop:3 }}>Solo IVA ES — esclusa IVA estera UE (gestita separatamente)</div>
+          </div>
+          <button onClick={onClose} style={{ background:"none",fontSize:20,color:"#999" }}>×</button>
+        </div>
+
+        {/* Saldo totale — il contatore */}
+        <div style={{ background: saldoFinale>=0?"#e8f5e9":"#ffebee", border:`2px solid ${saldoFinale>=0?"#a5d6a7":"#ef9a9a"}`, borderRadius:12, padding:"16px 20px", marginBottom:20, display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+          <div>
+            <div style={{ fontSize:10,fontWeight:700,color:saldoFinale>=0?"#2e7d32":"#c62828",letterSpacing:"1.5px",textTransform:"uppercase" }}>
+              {saldoFinale>=0?"✓ CREDITO AEAT ACUMULADO":"⚠ DEUDA AEAT"}
+            </div>
+            <div style={{ fontSize:32,fontWeight:900,color:saldoFinale>=0?"#28a745":"#E30613",lineHeight:1,marginTop:4 }}>
+              {fmt(Math.abs(saldoFinale))}
+            </div>
+            <div style={{ fontSize:11,color:"#999",marginTop:4 }}>
+              Soportado {fmt(totSop)} − Repercutido {fmt(totRep)} − Devuelto {fmt(totDevol)}
+            </div>
+          </div>
+          <div style={{ textAlign:"right" }}>
+            <div style={{ fontSize:10,color:"#bbb",fontWeight:700 }}>REDEME ACTIVO</div>
+            <div style={{ fontSize:12,color:"#3949ab",fontWeight:700,marginTop:4 }}>Rimborso mensile</div>
+            <div style={{ fontSize:10,color:"#bbb",marginTop:2 }}>Scadenza 303: 20° giorno mese successivo</div>
+          </div>
+        </div>
+
+        {/* Tabella trimestrale con contatore */}
+        <div style={{ marginBottom:20 }}>
+          <div style={{ fontSize:10,fontWeight:700,letterSpacing:"1.5px",textTransform:"uppercase",color:"#bbb",marginBottom:10 }}>Riepilogo trimestrale — contatore cumulato</div>
+          <table>
+            <thead>
+              <tr>
+                <th>Trim.</th>
+                <th style={{ textAlign:"right" }}>Soportado</th>
+                <th style={{ textAlign:"right" }}>Repercutido</th>
+                <th style={{ textAlign:"right" }}>Credito 303</th>
+                <th style={{ textAlign:"right" }}>Devuelto AEAT</th>
+                <th style={{ textAlign:"right" }}>Saldo cumulato</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((r,i)=>{
+                const hasData = r.soportado>0||r.repercutido>0||r.devuelto>0;
+                return (
+                  <tr key={r.trim} style={{ background: !hasData?"transparent": r.saldoCumulato>=0?"#f8fff8":"#fff8f8" }}>
+                    <td style={{ fontWeight:700,color:"#E30613" }}>{r.trim}</td>
+                    <td style={{ textAlign:"right",color:r.soportado?"#3949ab":"#bbb" }}>{r.soportado?fmt(r.soportado):"—"}</td>
+                    <td style={{ textAlign:"right",color:r.repercutido?"#E30613":"#bbb" }}>{r.repercutido?fmt(r.repercutido):"—"}</td>
+                    <td style={{ textAlign:"right",fontWeight:600,color:r.credito303>0?"#28a745":r.credito303<0?"#E30613":"#bbb" }}>
+                      {r.credito303!==0?(r.credito303>0?"+":"")+fmt(r.credito303):"—"}
+                    </td>
+                    <td style={{ textAlign:"right",color:r.devuelto?"#28a745":"#bbb" }}>{r.devuelto?fmt(r.devuelto):"—"}</td>
+                    <td style={{ textAlign:"right",fontWeight:800,fontSize:14,color:r.saldoCumulato>=0?"#28a745":"#E30613" }}>
+                      {fmt(r.saldoCumulato)}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+            <tfoot>
+              <tr style={{ borderTop:"2px solid #E0E0E0",background:"#FAFAFA" }}>
+                <td style={{ fontWeight:700 }}>TOTAL</td>
+                <td style={{ textAlign:"right",fontWeight:700,color:"#3949ab" }}>{fmt(totSop)}</td>
+                <td style={{ textAlign:"right",fontWeight:700,color:"#E30613" }}>{fmt(totRep)}</td>
+                <td style={{ textAlign:"right",fontWeight:700,color:totSop-totRep>=0?"#28a745":"#E30613" }}>{fmt(totSop-totRep)}</td>
+                <td style={{ textAlign:"right",fontWeight:700,color:"#28a745" }}>{totDevol?fmt(totDevol):"—"}</td>
+                <td style={{ textAlign:"right",fontWeight:900,fontSize:15,color:saldoFinale>=0?"#28a745":"#E30613" }}>{fmt(saldoFinale)}</td>
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+
+        {/* Dettaglio fatture con IVA ES */}
+        {fatES.length > 0 && (
+          <div style={{ marginBottom:16 }}>
+            <div style={{ fontSize:10,fontWeight:700,letterSpacing:"1.5px",textTransform:"uppercase",color:"#bbb",marginBottom:10 }}>
+              Fatture acquisti con IVA ES ({fatES.length})
+            </div>
+            <div style={{ maxHeight:220,overflowY:"auto" }}>
+              <table>
+                <thead><tr><th>N°</th><th>Fecha</th><th>Proveedor</th><th style={{ textAlign:"right" }}>Base imp.</th><th style={{ textAlign:"right" }}>IVA</th><th>%</th><th>Stato</th></tr></thead>
+                <tbody>
+                  {fatES.map(inv=>(
+                    <tr key={inv.id}>
+                      <td style={{ fontSize:11,color:"#E30613",fontWeight:700 }}>{inv.number||"—"}</td>
+                      <td style={{ fontSize:11,color:"#999" }}>{fmtDate(inv.fechaOperacion||inv.date)}</td>
+                      <td style={{ fontSize:11,maxWidth:140,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap" }}>{inv.supplier||"—"}</td>
+                      <td style={{ textAlign:"right",fontSize:11 }}>{fmt(inv.netAmount)}</td>
+                      <td style={{ textAlign:"right",fontWeight:600,color:"#3949ab",fontSize:11 }}>{fmt(inv.ivaAmount)}</td>
+                      <td style={{ fontSize:10,color:"#bbb" }}>{inv.ivaType}</td>
+                      <td><span className={`badge ${inv.status==="riconciliata"?"badge-blue":inv.status==="pagata"?"badge-green":"badge-yellow"}`}>{inv.status}</span></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+
+        <div style={{ background:"#fffde7",border:"1.5px solid #ffe082",borderRadius:8,padding:"10px 14px",marginBottom:16,fontSize:11,color:"#b8860b" }}>
+          ℹ️ <strong>IVA estera (IT/FR/DE/AT/BE)</strong> gestita separatamente tramite pratica Dir.2008/9/CE — vedi pannello "Recupero IVA Estera" nel dashboard.
+          La IVA estera <strong>non</strong> transita nel Modelo 303.
+        </div>
+
+        <button className="btn-ghost" style={{ width:"100%",marginTop:4 }} onClick={onClose}>Cerrar</button>
       </div>
     </div>
   );
 }
 
-// ── IBKR TAB ─────────────────────────────────────────────────────────────────
+
 function IbkrTab({ data, setIbkrModal, deleteIbkr }) {
   const positions = data.ibkrPositions || [];
   const byTicker = {};
@@ -1602,8 +1764,7 @@ function ContabilidadTab({ data, persist, contabView, setContabView, mayorCuenta
     return { ...asset, quotaYear, accumulated, netValue: asset.costEur-accumulated };
   });
   const mayorData = mayorSaldos[mayorCuenta]||{ debe:0, haber:0, movs:[] };
-  // BUG-1 fix: saldoProgr calcolato inline nel map via reduce — non come variabile di render
-  // così è sempre corretto quando si cambia conto dal dropdown
+  let saldoProgr = 0;
 
   return (
     <div>
@@ -1611,10 +1772,7 @@ function ContabilidadTab({ data, persist, contabView, setContabView, mayorCuenta
         <div className="section-title">Contabilidad PGC — Iber-Silos SLU</div>
         <div style={{ display:"flex",gap:8 }}>
           <button className="btn-ghost" style={{ fontSize:11 }} onClick={exportContabCSV}>↓ Libro Diario CSV</button>
-          <button className="btn-red" onClick={()=>{
-              const maxN = (data.asientos||[]).reduce((mx,a)=>{ const n=parseInt(a.numero)||0; return n>mx?n:mx; },0);
-              setAsientoModal({ id:null,fecha:today(),numero:String(maxN+1).padStart(4,"0"),concepto:"",lineas:[{cuenta:"",debe:"",haber:"",descripcion:""},{cuenta:"",debe:"",haber:"",descripcion:""}],notas:"" });
-            }}>+ Asiento</button>
+          <button className="btn-red" onClick={()=>setAsientoModal({ id:null,fecha:today(),numero:String((asientos.length+1)).padStart(4,"0"),concepto:"",lineas:[{cuenta:"",debe:"",haber:"",descripcion:""},{cuenta:"",debe:"",haber:"",descripcion:""}],notas:"" })}>+ Asiento</button>
         </div>
       </div>
       <div style={{ display:"flex",gap:6,marginBottom:20 }}>
@@ -1678,25 +1836,19 @@ function ContabilidadTab({ data, persist, contabView, setContabView, mayorCuenta
             {mayorData.movs.length===0 ? <div style={{ color:"#bbb",fontSize:13 }}>Sin movimiento.</div> :
               <table>
                 <thead><tr><th>N°</th><th>Fecha</th><th>Concepto</th><th style={{ textAlign:"right" }}>Debe</th><th style={{ textAlign:"right" }}>Haber</th><th style={{ textAlign:"right" }}>Saldo progr.</th></tr></thead>
-                <tbody>{(() => {
-                  // BUG-1 fix: saldo progressivo calcolato per ogni riga con reduce
-                  // Reset automatico ad ogni render — nessuna variabile di render condivisa
-                  const movsOrdinati = [...mayorData.movs].sort((a,b)=>a.fecha.localeCompare(b.fecha));
-                  let saldo = 0;
-                  return movsOrdinati.map((m,i) => {
-                    saldo += m.debe - m.haber;
-                    return (
-                      <tr key={i}>
-                        <td style={{ color:"#E30613",fontWeight:700 }}>{m.num}</td>
-                        <td style={{ color:"#999" }}>{fmtDate(m.fecha)}</td>
-                        <td style={{ maxWidth:200,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap" }}>{m.concepto}</td>
-                        <td style={{ textAlign:"right",color:m.debe?"#28a745":"#F5F5F5" }}>{m.debe?fmt(m.debe):""}</td>
-                        <td style={{ textAlign:"right",color:m.haber?"#E30613":"#F5F5F5" }}>{m.haber?fmt(m.haber):""}</td>
-                        <td style={{ textAlign:"right",fontWeight:600,color:saldo>=0?"#3949ab":"#E30613" }}>{fmt(Math.abs(saldo))} {saldo>=0?"D":"H"}</td>
-                      </tr>
-                    );
-                  });
-                })()}</tbody>
+                <tbody>{mayorData.movs.sort((a,b)=>a.fecha.localeCompare(b.fecha)).map((m,i)=>{
+                  saldoProgr+=m.debe-m.haber;
+                  return (
+                    <tr key={i}>
+                      <td style={{ color:"#E30613",fontWeight:700 }}>{m.num}</td>
+                      <td style={{ color:"#999" }}>{fmtDate(m.fecha)}</td>
+                      <td style={{ maxWidth:200,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap" }}>{m.concepto}</td>
+                      <td style={{ textAlign:"right",color:m.debe?"#28a745":"#F5F5F5" }}>{m.debe?fmt(m.debe):""}</td>
+                      <td style={{ textAlign:"right",color:m.haber?"#E30613":"#F5F5F5" }}>{m.haber?fmt(m.haber):""}</td>
+                      <td style={{ textAlign:"right",fontWeight:600,color:saldoProgr>=0?"#3949ab":"#E30613" }}>{fmt(Math.abs(saldoProgr))} {saldoProgr>=0?"D":"H"}</td>
+                    </tr>
+                  );
+                })}</tbody>
                 <tfoot><tr>
                   <td colSpan={3} style={{ fontWeight:700,fontSize:11,color:"#999" }}>TOTALES</td>
                   <td style={{ textAlign:"right",fontWeight:700,color:"#28a745",borderTop:"2px solid #F5F5F5" }}>{fmt(mayorData.debe)}</td>
@@ -1825,13 +1977,15 @@ function InvoiceTable({ invoices, onEdit, onDelete }) {
           <table>
             <thead><tr><th>N°</th><th>Fecha</th><th>Venc.</th><th>Tipo</th><th>Contraparte</th><th>Descripción</th><th style={{ textAlign:"right" }}>Base imp.</th><th>IVA</th><th style={{ textAlign:"right" }}>Total</th><th>Stato</th><th></th></tr></thead>
             <tbody>{[...filtered].reverse().map(inv=>{
-              // Fix-3: badge ⚠ per fatture ricevute con IVA ma paese non classificato
+              // Fix-3: badge ⚠ per fatture ricevute con IVA estera non classificata
+              // Segnala se ivaAmount > 0 (IVA ES generica) ma paisIvaOrigen non è stato
+              // impostato esplicitamente — si applica a tutti i fornitori, non solo lista fissa
               const needsIvaClassification =
                 inv.type === "ricevuta" &&
-                (parseFloat(inv.ivaAmount) > 0 || parseFloat(inv.netAmount) > 100) &&
+                (parseFloat(inv.ivaAmount) > 0) &&
                 (!inv.paisIvaOrigen || inv.paisIvaOrigen === "ES") &&
-                // Solo se il fornitore è tipicamente estero
-                (inv.supplier||"").match(/DKV|BMB|CCI|Buzzatti|T-Way|Truck Service/i);
+                // Escludi fornitori chiaramente spagnoli (IVA ES corretto)
+                !(inv.supplier||"").match(/La Clau|Gestrams|Poligon|Brochette|Ruta|Reconquista|Vegallana|Lacamart|Doyouspain/i);
 
               return (
               <tr key={inv.id} style={{ background: needsIvaClassification ? "#fffde7" : undefined }}>
@@ -1914,7 +2068,8 @@ function InvoiceModal({ inv, onSave, onClose }) {
     // Ricalcolo IVA ES (ordinaria, conto 472)
     if (k==="netAmount" || k==="ivaType") {
       const net  = parseFloat(k==="netAmount" ? v : f.netAmount) || 0;
-      const rate = IVA_TYPES_KEYS[k==="ivaType" ? v : f.ivaType] ?? 0.21;
+      const ivaTypeKey = k==="ivaType" ? v : f.ivaType;
+      const rate = (ivaTypeKey in IVA_TYPES_KEYS) ? IVA_TYPES_KEYS[ivaTypeKey] : 0.21;
       updated.ivaAmount   = parseFloat((net * rate).toFixed(2));
       updated.grossAmount = parseFloat((net + updated.ivaAmount).toFixed(2));
     }
