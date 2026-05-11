@@ -543,6 +543,7 @@ export default function IberSilosApp() {
   const [bimModal, setBimModal] = useState(false);
   const [aeatModal, setAeatModal] = useState(false);
   const [fattureAperteModal, setFattureAperteModal] = useState(false);
+  const [importConfirmModal, setImportConfirmModal] = useState(null);
   const fileRef = useRef();
   const pdfRef = useRef();
 
@@ -656,19 +657,41 @@ export default function IberSilosApp() {
   };
   const importJSON = (e) => {
     const file = e.target.files[0]; if (!file) return;
+    e.target.value = "";
     const reader = new FileReader();
     reader.onload = (ev) => {
       try {
-        const d = JSON.parse(ev.target.result);
-        // Applica migrazione campi IVA estera su tutte le fatture ricevute
-        if (d.invoices) d.invoices = d.invoices.map(migrateInvoice);
-        persist(d);
-        showToast("Datos importados");
-      } catch {
-        showToast("Archivo no válido", "err");
+        const parsed = JSON.parse(ev.target.result);
+        // DATA-2: validazione schema minima prima di sovrascrivere
+        if (!parsed || typeof parsed !== "object") { showToast("❌ File non valido: non è un oggetto JSON", "err"); return; }
+        if (!Array.isArray(parsed?.invoices))  { showToast("❌ File non valido: 'invoices' mancante", "err"); return; }
+        if (!Array.isArray(parsed?.movements)) { showToast("❌ File non valido: 'movements' mancante", "err"); return; }
+        if (!Array.isArray(parsed?.asientos))  { showToast("❌ File non valido: 'asientos' mancante", "err"); return; }
+        // Migrazione campi IVA estera
+        if (parsed.invoices) parsed.invoices = parsed.invoices.map(migrateInvoice);
+        // Modal conferma con riepilogo
+        setImportConfirmModal({ parsed, summary: {
+          invoices:  parsed.invoices?.length||0,
+          movements: parsed.movements?.length||0,
+          asientos:  parsed.asientos?.length||0,
+          ibkr:      parsed.ibkrPositions?.length||0,
+          currentInv: data.invoices?.length||0,
+          currentMov: data.movements?.length||0,
+          currentAsi: data.asientos?.length||0,
+        }});
+      } catch (err) {
+        showToast("❌ Archivo no válido: " + err.message, "err");
       }
     };
-    reader.readAsText(file); e.target.value = "";
+    reader.readAsText(file);
+  };
+
+  const confirmImport = () => {
+    if (!importConfirmModal) return;
+    persist(importConfirmModal.parsed);
+    const s = importConfirmModal.summary;
+    setImportConfirmModal(null);
+    showToast(`✓ Importati: ${s.invoices} fatture · ${s.movements} movimenti · ${s.asientos} asientos`);
   };
 
   const exportContabCSV = () => {
@@ -677,6 +700,58 @@ export default function IberSilosApp() {
     const csv = rows.map(r => r.map(v=>`"${String(v).replace(/"/g,'""')}"`).join(",")).join("\n");
     const blob = new Blob([csv],{type:"text/csv;charset=utf-8;"}); const a=document.createElement("a"); a.href=URL.createObjectURL(blob); a.download=`libro-diario-${today()}.csv`; a.click();
     showToast("Libro Diario exportado");
+  };
+
+  const exportIvaEsteraCSV = (trimestre) => {
+    const ej = EJERCICIOS.find(e=>e.id===ejercicio)||EJERCICIOS[1];
+    const anno = ej.from.slice(0,4);
+    const mesiMap = { T1:[1,2,3], T2:[4,5,6], T3:[7,8,9], T4:[10,11,12] };
+    const mesi = mesiMap[trimestre];
+    const scadenzeMap = { T1:`30/04/${anno}`, T2:`31/07/${anno}`, T3:`31/10/${anno}`, T4:`31/01/${parseInt(anno)+1}` };
+    const PAESI_UE = ["IT","FR","DE","AT","BE"];
+    const fatture = data.invoices.filter(inv => {
+      if (inv.type !== "ricevuta") return false;
+      if (!inv.paisIvaOrigen || inv.paisIvaOrigen === "ES") return false;
+      if (!(parseFloat(inv.ivaEsteraAmount) > 0)) return false;
+      const d = inv.fechaOperacion || inv.date || "";
+      if (!d) return false;
+      const mo = parseInt(d.slice(5,7));
+      return mesi.includes(mo) && d >= ej.from && d <= ej.to;
+    }).sort((a,b) => {
+      const pa = a.paisIvaOrigen||"ZZ", pb = b.paisIvaOrigen||"ZZ";
+      if (pa !== pb) return pa.localeCompare(pb);
+      return (a.date||"").localeCompare(b.date||"");
+    });
+    if (fatture.length === 0) { showToast(`Nessuna fattura con IVA estera in ${trimestre} ${anno}`, "warn"); return; }
+    const cols = ["Trimestre","N° Fattura","Data Fattura","Fornitore","P.IVA Estera","Paese","Base Imponibile (EUR)","Aliquota (%)","IVA Recuperabile (EUR)","Descrizione","Link Documento","Scadenza Richiesta"];
+    const rows = [cols];
+    let totaleIva = 0;
+    fatture.forEach(inv => {
+      const pInfo = PAESI_UE_IVA.find(p => p.code === inv.paisIvaOrigen);
+      const ivaAmt = parseFloat(inv.ivaEsteraAmount) || 0;
+      totaleIva += ivaAmt;
+      rows.push([
+        `${trimestre} ${anno}`, inv.number||"", inv.date ? new Date(inv.date).toLocaleDateString("it-IT") : "",
+        inv.supplier||"", inv.vatForeignNumber||"",
+        pInfo ? `${pInfo.flag} ${pInfo.label}` : inv.paisIvaOrigen,
+        (parseFloat(inv.ivaEsteraBase)||0).toFixed(2).replace(".",","),
+        ((parseFloat(inv.ivaEsteraRate)||0)*100).toFixed(0)+"%",
+        ivaAmt.toFixed(2).replace(".",","),
+        inv.description||"", inv.dropboxLink||inv.driveFileId||"", scadenzeMap[trimestre],
+      ]);
+    });
+    rows.push([]);
+    rows.push([`TOTALE ${trimestre} ${anno}`,"","","","","",
+      fatture.reduce((s,i)=>s+(parseFloat(i.ivaEsteraBase)||0),0).toFixed(2).replace(".",","),"",
+      totaleIva.toFixed(2).replace(".",","),`${fatture.length} fatture`,"",scadenzeMap[trimestre]]);
+    const csv = rows.map(r => r.map(v=>`"${String(v||"").replace(/"/g,'""')}"`).join(";")).join("\n");
+    const blob = new Blob(["\uFEFF" + csv], { type: "text/csv;charset=utf-8;" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = `IberSilos_IVA_Estera_${ej.id}_${trimestre}_${anno}.csv`;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 100);
+    showToast(`✓ Export ${trimestre} ${anno} — ${fatture.length} fatture, IVA €${totaleIva.toFixed(2)}`);
   };
 
   const metrics = useMemo(() => {
@@ -863,7 +938,7 @@ export default function IberSilosApp() {
         </aside>
 
         <div style={{ flex:1, overflowY:"auto", padding:24, scrollBehavior:"smooth" }}>
-          {tab==="dashboard" && <DashboardTab data={data} metrics={metrics} forecast={forecast} ejercicio={ejercicio} EJERCICIOS={EJERCICIOS} bimModal={bimModal} setBimModal={setBimModal} aeatModal={aeatModal} setAeatModal={setAeatModal} />}
+          {tab==="dashboard" && <DashboardTab data={data} metrics={metrics} forecast={forecast} ejercicio={ejercicio} EJERCICIOS={EJERCICIOS} bimModal={bimModal} setBimModal={setBimModal} aeatModal={aeatModal} setAeatModal={setAeatModal} exportIvaEsteraCSV={exportIvaEsteraCSV} />}
 
           {tab==="fatture" && (
             <div>
@@ -1037,6 +1112,38 @@ export default function IberSilosApp() {
         </div>
       )}
 
+      {importConfirmModal && (
+        <div className="modal-overlay" onClick={()=>setImportConfirmModal(null)}>
+          <div className="modal" style={{ maxWidth:460 }} onClick={e=>e.stopPropagation()}>
+            <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:18 }}>
+              <div className="modal-title">⚠️ Conferma Import JSON</div>
+              <button onClick={()=>setImportConfirmModal(null)} style={{ background:"none",fontSize:20,color:"#999" }}>×</button>
+            </div>
+            <div style={{ background:"#fff8e1",border:"1.5px solid #ffe082",borderRadius:8,padding:"12px 14px",marginBottom:16,fontSize:12,color:"#b8860b",fontWeight:600 }}>
+              Stai per sovrascrivere tutti i dati attuali. Questa azione non è reversibile.
+            </div>
+            <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:18 }}>
+              <div style={{ background:"#ffebee",border:"1.5px solid #ef9a9a",borderRadius:8,padding:"10px 14px" }}>
+                <div style={{ fontSize:10,fontWeight:700,color:"#c62828",textTransform:"uppercase",marginBottom:8 }}>Dati attuali (persi)</div>
+                <div style={{ fontSize:12,color:"#666" }}>📄 {importConfirmModal.summary.currentInv} fatture</div>
+                <div style={{ fontSize:12,color:"#666" }}>💳 {importConfirmModal.summary.currentMov} movimenti</div>
+                <div style={{ fontSize:12,color:"#666" }}>📒 {importConfirmModal.summary.currentAsi} asientos</div>
+              </div>
+              <div style={{ background:"#e8f5e9",border:"1.5px solid #a5d6a7",borderRadius:8,padding:"10px 14px" }}>
+                <div style={{ fontSize:10,fontWeight:700,color:"#2e7d32",textTransform:"uppercase",marginBottom:8 }}>File (caricati)</div>
+                <div style={{ fontSize:12,color:"#666" }}>📄 {importConfirmModal.summary.invoices} fatture</div>
+                <div style={{ fontSize:12,color:"#666" }}>💳 {importConfirmModal.summary.movements} movimenti</div>
+                <div style={{ fontSize:12,color:"#666" }}>📒 {importConfirmModal.summary.asientos} asientos</div>
+              </div>
+            </div>
+            <div style={{ display:"flex",gap:8 }}>
+              <button className="btn-red" style={{ flex:1 }} onClick={confirmImport}>✓ Sì, importa e sovrascrivi</button>
+              <button className="btn-ghost" style={{ flex:1 }} onClick={()=>setImportConfirmModal(null)}>Annulla</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {toast && (
         <div style={{ position:"fixed",bottom:24,right:24,background:toast.type==="err"?"#ffebee":toast.type==="warn"?"#fffde7":"#e8f5e9",border:`1.5px solid ${toast.type==="err"?"#ef9a9a":toast.type==="warn"?"#ffe082":"#a5d6a7"}`,color:toast.type==="err"?"#c62828":toast.type==="warn"?"#b8860b":"#2e7d32",padding:"12px 20px",borderRadius:10,fontSize:13,fontWeight:600,zIndex:200,boxShadow:"0 4px 20px rgba(0,0,0,0.1)" }}>
           {toast.msg}
@@ -1049,6 +1156,58 @@ export default function IberSilosApp() {
 
 // ── DASHBOARD TAB ────────────────────────────────────────────────────────────
 // ── CARD IVA AEAT (Modelo 303 / REDEME) ─────────────────────────────────────
+// ── IVA ESTERA EXPORT BUTTON ─────────────────────────────────────────────────
+function IvaEsteraExportBtn({ exportIvaEsteraCSV, ejercicio }) {
+  const [open, setOpen] = useState(false);
+  const ej   = EJERCICIOS.find(e=>e.id===ejercicio)||EJERCICIOS[1];
+  const anno = ej.from.slice(0,4);
+  const trimestri = [
+    { id:"T1", label:`T1 ${anno}`, scad:`30/04/${anno}` },
+    { id:"T2", label:`T2 ${anno}`, scad:`31/07/${anno}` },
+    { id:"T3", label:`T3 ${anno}`, scad:`31/10/${anno}` },
+    { id:"T4", label:`T4 ${anno}`, scad:`31/01/${parseInt(anno)+1}` },
+  ];
+  return (
+    <div style={{ position:"relative" }}>
+      <button
+        className="btn-ghost"
+        style={{ fontSize:11, background:"#fffde7", borderColor:"#ffe082", color:"#b8860b", fontWeight:700 }}
+        onClick={() => setOpen(o => !o)}
+      >
+        ↓ Export CSV Hacienda
+      </button>
+      {open && (
+        <div style={{
+          position:"absolute", top:"100%", right:0, marginTop:4,
+          background:"white", border:"1.5px solid #ffe082", borderRadius:8,
+          boxShadow:"0 4px 20px rgba(0,0,0,0.12)", zIndex:50, minWidth:210, overflow:"hidden"
+        }}>
+          <div style={{ fontSize:9,fontWeight:700,letterSpacing:"1.5px",textTransform:"uppercase",color:"#bbb",padding:"8px 14px 4px" }}>
+            Seleziona trimestre
+          </div>
+          {trimestri.map(t => (
+            <button key={t.id}
+              onClick={() => { exportIvaEsteraCSV(t.id); setOpen(false); }}
+              style={{ display:"block",width:"100%",textAlign:"left",padding:"10px 14px",
+                background:"white",border:"none",borderBottom:"1px solid #F5F5F5",
+                cursor:"pointer",fontSize:12,fontWeight:600,color:"#1A1A1A" }}
+              onMouseEnter={e=>e.currentTarget.style.background="#fffde7"}
+              onMouseLeave={e=>e.currentTarget.style.background="white"}
+            >
+              <span style={{ fontWeight:800,color:"#b8860b",marginRight:8 }}>{t.id}</span>
+              {t.label}
+              <span style={{ float:"right",fontSize:10,color:"#bbb",fontWeight:400 }}>scad. {t.scad}</span>
+            </button>
+          ))}
+          <div style={{ padding:"8px 14px",fontSize:10,color:"#bbb",borderTop:"1px solid #F5F5F5" }}>
+            CSV ; · per La Clau Assessors
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function IvaAeatCard({ metrics, onDetail }) {
   const { ivaSop, ivaRep, ivaCredito, ivaDevol } = metrics;
   const isCredito = ivaCredito >= 0;
@@ -1233,7 +1392,7 @@ function IvaEsteraCard({ data, ejercicio, EJERCICIOS, exportIvaEsteraCSV, setBim
   );
 }
 
-function DashboardTab({ data, metrics, forecast, ejercicio, EJERCICIOS, bimModal, setBimModal, aeatModal, setAeatModal }) {
+function DashboardTab({ data, metrics, forecast, ejercicio, EJERCICIOS, bimModal, setBimModal, aeatModal, setAeatModal, exportIvaEsteraCSV }) {
   return (
     <div>
       <div className="section-title" style={{ marginBottom:20 }}>Panoramica</div>
@@ -1803,7 +1962,7 @@ function ContabilidadTab({ data, persist, contabView, setContabView, mayorCuenta
     return { ...asset, quotaYear, accumulated, netValue: asset.costEur-accumulated };
   });
   const mayorData = mayorSaldos[mayorCuenta]||{ debe:0, haber:0, movs:[] };
-  let saldoProgr = 0;
+  // BUG-1 fix: saldo calcolato inline nel map
 
   return (
     <div>
@@ -1875,19 +2034,23 @@ function ContabilidadTab({ data, persist, contabView, setContabView, mayorCuenta
             {mayorData.movs.length===0 ? <div style={{ color:"#bbb",fontSize:13 }}>Sin movimiento.</div> :
               <table>
                 <thead><tr><th>N°</th><th>Fecha</th><th>Concepto</th><th style={{ textAlign:"right" }}>Debe</th><th style={{ textAlign:"right" }}>Haber</th><th style={{ textAlign:"right" }}>Saldo progr.</th></tr></thead>
-                <tbody>{mayorData.movs.sort((a,b)=>a.fecha.localeCompare(b.fecha)).map((m,i)=>{
-                  saldoProgr+=m.debe-m.haber;
-                  return (
-                    <tr key={i}>
-                      <td style={{ color:"#E30613",fontWeight:700 }}>{m.num}</td>
-                      <td style={{ color:"#999" }}>{fmtDate(m.fecha)}</td>
-                      <td style={{ maxWidth:200,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap" }}>{m.concepto}</td>
-                      <td style={{ textAlign:"right",color:m.debe?"#28a745":"#F5F5F5" }}>{m.debe?fmt(m.debe):""}</td>
-                      <td style={{ textAlign:"right",color:m.haber?"#E30613":"#F5F5F5" }}>{m.haber?fmt(m.haber):""}</td>
-                      <td style={{ textAlign:"right",fontWeight:600,color:saldoProgr>=0?"#3949ab":"#E30613" }}>{fmt(Math.abs(saldoProgr))} {saldoProgr>=0?"D":"H"}</td>
-                    </tr>
-                  );
-                })}</tbody>
+                <tbody>{(() => {
+                  const movsOrd = [...mayorData.movs].sort((a,b)=>a.fecha.localeCompare(b.fecha));
+                  let saldo = 0;
+                  return movsOrd.map((m,i) => {
+                    saldo += m.debe - m.haber;
+                    return (
+                      <tr key={i}>
+                        <td style={{ color:"#E30613",fontWeight:700 }}>{m.num}</td>
+                        <td style={{ color:"#999" }}>{fmtDate(m.fecha)}</td>
+                        <td style={{ maxWidth:200,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap" }}>{m.concepto}</td>
+                        <td style={{ textAlign:"right",color:m.debe?"#28a745":"#F5F5F5" }}>{m.debe?fmt(m.debe):""}</td>
+                        <td style={{ textAlign:"right",color:m.haber?"#E30613":"#F5F5F5" }}>{m.haber?fmt(m.haber):""}</td>
+                        <td style={{ textAlign:"right",fontWeight:600,color:saldo>=0?"#3949ab":"#E30613" }}>{fmt(Math.abs(saldo))} {saldo>=0?"D":"H"}</td>
+                      </tr>
+                    );
+                  });
+                })()}</tbody>
                 <tfoot><tr>
                   <td colSpan={3} style={{ fontWeight:700,fontSize:11,color:"#999" }}>TOTALES</td>
                   <td style={{ textAlign:"right",fontWeight:700,color:"#28a745",borderTop:"2px solid #F5F5F5" }}>{fmt(mayorData.debe)}</td>
