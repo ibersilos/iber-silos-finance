@@ -19,6 +19,8 @@ const SUPPLIERS = ["CCI Italia SRLS", "BMB Trasporti", "T-Way (renting)", "La Cl
   "IVA DE 19%": 0,
   "IVA AT 20%": 0,
   "IVA BE 21%": 0,
+  "RC art.7-ter (intra) NS": 0,
+  "IVA 0% (exento)": 0,
 };
 const IBKR_ETFS = ["VWCE", "VUAA", "SEC0", "C50", "Altro"];
 const STORAGE_KEY = "iber-silos-v2";
@@ -95,24 +97,31 @@ const DEFAULT_ASSETS = [
   { id:"comp2", name:"Compresor 2", account:"224", costEur:3000, dateAcq:"2025-01-20", rateAnnual:AMORT_RATES.maquinaria },
 ];
 
+// M-2 fix: calcAmortYear iterativa — elimina ricorsione O(n²)
 function calcAmortYear(asset, year) {
   const acqDate = new Date(asset.dateAcq);
   const acqYear = acqDate.getFullYear();
   if (year < acqYear) return 0;
   const annualAmt = asset.costEur * asset.rateAnnual;
+  // Anno di acquisto: quota proporzionale ai giorni residui
   if (year === acqYear) {
-    const daysInYear = 365;
     const startDay = Math.floor((acqDate - new Date(acqYear, 0, 1)) / 86400000);
-    return parseFloat(((annualAmt * (daysInYear - startDay)) / daysInYear).toFixed(2));
+    return parseFloat(((annualAmt * (365 - startDay)) / 365).toFixed(2));
   }
-  let totalPrev = 0;
-  for (let y = acqYear; y < year; y++) totalPrev += calcAmortYear(asset, y);
-  return Math.min(annualAmt, Math.max(0, asset.costEur - totalPrev));
+  // Anni successivi: calcolo iterativo (no ricorsione)
+  let accumulated = calcAmortYear(asset, acqYear);
+  for (let y = acqYear + 1; y < year; y++) {
+    const residuo = asset.costEur - accumulated;
+    accumulated += Math.min(annualAmt, Math.max(0, residuo));
+  }
+  return Math.min(annualAmt, Math.max(0, asset.costEur - accumulated));
 }
 
 function calcAmortAccumulated(asset, upToYear) {
   let total = 0;
-  for (let y = new Date(asset.dateAcq).getFullYear(); y <= upToYear; y++) total += calcAmortYear(asset, y);
+  for (let y = new Date(asset.dateAcq).getFullYear(); y <= upToYear; y++) {
+    total += calcAmortYear(asset, y);
+  }
   return Math.min(total, asset.costEur);
 }
 
@@ -551,7 +560,7 @@ export default function IberSilosApp() {
 
   const persist = useCallback(async (newData) => { setData(newData); await saveData(newData); }, []);
 
-  const showToast = (msg, type = "ok") => { setToast({ msg, type }); setTimeout(() => setToast(null), 3000); };
+  const showToast = useCallback((msg, type = "ok") => { setToast({ msg, type }); setTimeout(() => setToast(null), 3000); }, []);
 
   const saveInvoice = (inv) => {
     const net = parseFloat(inv.netAmount) || 0;
@@ -1392,42 +1401,164 @@ function IvaEsteraCard({ data, ejercicio, EJERCICIOS, exportIvaEsteraCSV, setBim
   );
 }
 
-function DashboardTab({ data, metrics, forecast, ejercicio, EJERCICIOS, bimModal, setBimModal, aeatModal, setAeatModal, exportIvaEsteraCSV }) {
-  return (
-    <div>
-      <div className="section-title" style={{ marginBottom:20 }}>Panoramica</div>
-      <div style={{ display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:14, marginBottom:20 }}>
-        <div className="kpi-card"><div className="kpi-label">Facturado neto</div><div className="kpi-value" style={{ color:"#E30613" }}>{fmt(metrics.fatturato)}</div></div>
-        <div className="kpi-card yellow"><div className="kpi-label">Costes netos</div><div className="kpi-value" style={{ color:"#b8860b" }}>{fmt(metrics.costi)}</div></div>
-        <div className="kpi-card green"><div className="kpi-label">Margen bruto</div><div className="kpi-value" style={{ color:metrics.margine>=0?"#28a745":"#E30613" }}>{fmt(metrics.margine)} <span style={{ fontSize:14, color:"#999" }}>{metrics.marginePerc.toFixed(1)}%</span></div></div>
-        <div className="kpi-card yellow"><div className="kpi-label">Créditos abiertos</div><div className="kpi-value" style={{ color:"#b8860b" }}>{fmt(metrics.creditiAperti)}</div></div>
-        <div className="kpi-card gray"><div className="kpi-label">Débitos abiertos</div><div className="kpi-value" style={{ color:"#666" }}>{fmt(metrics.debitiAperti)}</div></div>
-        <div className="kpi-card blue"><div className="kpi-label">Liquidez estimada</div><div className="kpi-value" style={{ color:metrics.liquidita>=0?"#3949ab":"#E30613" }}>{fmt(metrics.liquidita)}</div></div>
-      </div>
+// ── EsposizioneFornitori CARD ─────────────────────────────────────────────────────────────────
+function EsposizioneFornitoriCard({ data, metrics, ejercicio, EJERCICIOS }) {
+const ej = EJERCICIOS.find(e=>e.id===ejercicio)||EJERCICIOS[2];
+        const ricevute = data.invoices.filter(i=>{
+          const d=i.fechaOperacion||i.date||"";
+          return i.type==="ricevuta" && d>=ej.from && d<=ej.to;
+        });
+        // Raggruppa per fornitore
+        const bySupp = {};
+        ricevute.forEach(i=>{
+          const s = i.supplier || "Altro";
+          if (!bySupp[s]) bySupp[s] = { supplier:s, totale:0, aperte:0, pagato:0 };
+          const net = parseFloat(i.netAmount)||0;
+          bySupp[s].totale += net;
+          if (i.status==="aperta") bySupp[s].aperte += parseFloat(i.grossAmount)||0;
+          else bySupp[s].pagato += net;
+        });
+        const rows = Object.values(bySupp).sort((a,b)=>b.totale-a.totale).slice(0,6);
+        if (!rows.length) return null;
+        const totale = rows.reduce((s,r)=>s+r.totale,0);
+        return (
+          <div className="card">
+            <div style={{ fontSize:10,fontWeight:700,letterSpacing:"1.5px",textTransform:"uppercase",color:"#bbb",marginBottom:14 }}>
+              Esposizione fornitori — {EJERCICIOS.find(e=>e.id===ejercicio)?.label}
+            </div>
+            <table>
+              <thead><tr><th>Fornitore</th><th style={{ textAlign:"right" }}>Totale costi</th><th style={{ textAlign:"right" }}>% su totale</th><th style={{ textAlign:"right" }}>Ancora aperto</th></tr></thead>
+              <tbody>
+                {rows.map(r=>(
+                  <tr key={r.supplier}>
+                    <td style={{ fontWeight:600 }}>{r.supplier}</td>
+                    <td style={{ textAlign:"right" }}>{fmt(r.totale)}</td>
+                    <td style={{ textAlign:"right" }}>
+                      <div style={{ display:"flex",alignItems:"center",justifyContent:"flex-end",gap:8 }}>
+                        <div style={{ width:60,height:4,background:"#F5F5F5",borderRadius:2 }}>
+                          <div style={{ width:`${Math.min(r.totale/totale*100,100)}%`,height:"100%",background:"#3949ab",borderRadius:2 }} />
+                        </div>
+                        <span style={{ fontSize:11,color:"#999" }}>{(r.totale/totale*100).toFixed(0)}%</span>
+                      </div>
+                    </td>
+                    <td style={{ textAlign:"right",fontWeight:r.aperte>0?700:400,color:r.aperte>0?"#E30613":"#bbb" }}>
+                      {r.aperte>0?fmt(r.aperte):"—"}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        );
+}
 
-      <IvaAeatCard metrics={metrics} onDetail={()=>setAeatModal(true)} />
+// ── CreditiScaduti CARD ─────────────────────────────────────────────────────────────────
+function CreditiScadutiCard({ data, metrics, ejercicio, EJERCICIOS }) {
+const todayStr = new Date().toISOString().split("T")[0];
+        const scaduti = data.invoices
+          .filter(i=>i.type==="emessa" && i.status==="aperta" && i.dueDate && i.dueDate < todayStr)
+          .map(i=>({ ...i, giorniScaduto: Math.round((new Date(todayStr)-new Date(i.dueDate))/86400000) }))
+          .sort((a,b)=>b.giorniScaduto-a.giorniScaduto);
+        const aperteNonScadute = data.invoices.filter(i=>i.type==="emessa"&&i.status==="aperta"&&(!i.dueDate||i.dueDate>=todayStr));
+        if (!scaduti.length && !aperteNonScadute.length) return null;
+        return (
+          <div className="card" style={{ marginBottom:16 }}>
+            <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14 }}>
+              <div style={{ fontSize:10,fontWeight:700,letterSpacing:"1.5px",textTransform:"uppercase",color:"#bbb" }}>
+                Crediti — Scaduto e in scadenza
+              </div>
+              {scaduti.length>0 && (
+                <span style={{ background:"#ffebee",border:"1.5px solid #ef9a9a",borderRadius:6,padding:"4px 12px",fontSize:12,fontWeight:800,color:"#E30613" }}>
+                  🔴 {fmt(scaduti.reduce((s,i)=>s+(parseFloat(i.grossAmount)||0),0))} scaduto
+                </span>
+              )}
+            </div>
+            <table>
+              <thead><tr><th>N°</th><th>Cliente</th><th>Scadenza</th><th style={{ textAlign:"right" }}>Giorni</th><th style={{ textAlign:"right" }}>Importo</th><th>Stato</th></tr></thead>
+              <tbody>
+                {scaduti.map(inv=>(
+                  <tr key={inv.id} style={{ background:"#fff5f5" }}>
+                    <td style={{ fontWeight:700,color:"#E30613" }}>{inv.number||"—"}</td>
+                    <td style={{ fontWeight:600 }}>{inv.client||"—"}</td>
+                    <td style={{ color:"#E30613",fontWeight:700 }}>{fmtDate(inv.dueDate)}</td>
+                    <td style={{ textAlign:"right",fontWeight:800,color:"#E30613" }}>+{inv.giorniScaduto}gg</td>
+                    <td style={{ textAlign:"right",fontWeight:700 }}>{fmt(inv.grossAmount)}</td>
+                    <td><span className="badge badge-red">scaduta</span></td>
+                  </tr>
+                ))}
+                {aperteNonScadute.map(inv=>{
+                  const gg = inv.dueDate ? Math.round((new Date(inv.dueDate)-new Date(todayStr))/86400000) : null;
+                  return (
+                    <tr key={inv.id}>
+                      <td style={{ fontWeight:700,color:"#E30613" }}>{inv.number||"—"}</td>
+                      <td style={{ fontWeight:600 }}>{inv.client||"—"}</td>
+                      <td style={{ color:"#999" }}>{fmtDate(inv.dueDate)}</td>
+                      <td style={{ textAlign:"right",color:gg!==null&&gg<=7?"#b8860b":"#bbb" }}>{gg!==null?`${gg}gg`:"—"}</td>
+                      <td style={{ textAlign:"right",fontWeight:700 }}>{fmt(inv.grossAmount)}</td>
+                      <td><span className="badge badge-yellow">aperta</span></td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        );
+}
 
-      <div className="card" style={{ marginBottom:16 }}>
-        <div style={{ fontSize:10, fontWeight:700, letterSpacing:"1.5px", textTransform:"uppercase", color:"#bbb", marginBottom:12 }}>Forecast liquidez 90 días</div>
-        <ResponsiveContainer width="100%" height={180}>
-          <LineChart data={forecast}>
-            <CartesianGrid strokeDasharray="3 3" stroke="#F5F5F5" />
-            <XAxis dataKey="day" tick={{ fontSize:10, fill:"#bbb" }} interval={4} />
-            <YAxis tick={{ fontSize:10, fill:"#bbb" }} tickFormatter={v=>`${(v/1000).toFixed(0)}k`} />
-            <Tooltip contentStyle={{ background:"white", border:"1.5px solid #E0E0E0", borderRadius:8, fontSize:12 }} formatter={(v)=>[fmt(v),"Liquidità"]} />
-            <ReferenceLine y={0} stroke="rgba(227,6,19,0.3)" strokeDasharray="4 4" />
-            <ReferenceLine y={30000} stroke="rgba(40,167,69,0.3)" strokeDasharray="4 4" />
-            <Line type="monotone" dataKey="balance" stroke="#E30613" strokeWidth={2.5} dot={false} />
-          </LineChart>
-        </ResponsiveContainer>
-      </div>
-
-      {/* ── RECUPERO IVA ESTERA ── */}
-      <IvaEsteraCard data={data} ejercicio={ejercicio} EJERCICIOS={EJERCICIOS} exportIvaEsteraCSV={exportIvaEsteraCSV} setBimModal={setBimModal} />
-
-      {/* ── PANNELLO 1: CICLO DI CASSA (DSO / DPO) ── */}
-      {(() => {
+// ── CashFlowMensile CARD ─────────────────────────────────────────────────────────────────
+function CashFlowMensileCard({ data, metrics, ejercicio, EJERCICIOS }) {
+if (!data.movements.length) return null;
         const ej = EJERCICIOS.find(e=>e.id===ejercicio)||EJERCICIOS[2];
+        const byMonth = {};
+        data.movements
+          .filter(m=>{ const d=m.date||""; return d>=ej.from&&d<=ej.to; })
+          .forEach(m=>{
+            const mo = m.date.slice(0,7);
+            if (!byMonth[mo]) byMonth[mo] = { month:m.date.slice(5,7)+"/"+m.date.slice(2,4), entrate:0, uscite:0 };
+            if (m.type==="entrata") byMonth[mo].entrate += parseFloat(m.amount)||0;
+            else                    byMonth[mo].uscite  += parseFloat(m.amount)||0;
+          });
+        const chartData = Object.values(byMonth)
+          .sort((a,b)=>a.month.localeCompare(b.month))
+          .map(d=>({ ...d, netto: d.entrate - d.uscite }));
+        if (!chartData.length) return null;
+        return (
+          <div className="card" style={{ marginBottom:16 }}>
+            <div style={{ fontSize:10,fontWeight:700,letterSpacing:"1.5px",textTransform:"uppercase",color:"#bbb",marginBottom:14 }}>
+              Cash Flow Banco — Mensile reale (movimenti Revolut)
+            </div>
+            <div style={{ display:"flex",gap:16,marginBottom:10,fontSize:11 }}>
+              <span style={{ display:"flex",alignItems:"center",gap:5 }}><span style={{ width:12,height:12,background:"#28a745",borderRadius:2,display:"inline-block" }}/> Entrate</span>
+              <span style={{ display:"flex",alignItems:"center",gap:5 }}><span style={{ width:12,height:12,background:"#3949ab",borderRadius:2,display:"inline-block" }}/> Uscite</span>
+              <span style={{ display:"flex",alignItems:"center",gap:5 }}><span style={{ width:12,height:12,background:"#E30613",borderRadius:2,display:"inline-block" }}/> Netto</span>
+            </div>
+            <ResponsiveContainer width="100%" height={200}>
+              <BarChart data={chartData} barGap={2} barCategoryGap="20%">
+                <CartesianGrid strokeDasharray="3 3" stroke="#F5F5F5" vertical={false} />
+                <XAxis dataKey="month" tick={{ fontSize:11,fill:"#bbb" }} axisLine={false} tickLine={false} />
+                <YAxis tick={{ fontSize:10,fill:"#bbb" }} tickFormatter={v=>v>=1000?`${(v/1000).toFixed(0)}k`:`${v}`} axisLine={false} tickLine={false} />
+                <Tooltip
+                  contentStyle={{ background:"white",border:"1.5px solid #E0E0E0",borderRadius:8,fontSize:12 }}
+                  formatter={(v,n)=>[fmt(v), n==="entrate"?"Entrate":n==="uscite"?"Uscite":"Netto"]}
+                />
+                <ReferenceLine y={0} stroke="rgba(227,6,19,0.3)" strokeDasharray="4 4" />
+                <Bar dataKey="entrate" fill="#28a745" radius={[3,3,0,0]} />
+                <Bar dataKey="uscite"  fill="#3949ab" radius={[3,3,0,0]} />
+                <Bar dataKey="netto" radius={[3,3,0,0]}>
+                  {chartData.map((d,i)=><Cell key={i} fill={d.netto>=0?"#E30613":"#ff6b6b"} />)}
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+            <div style={{ fontSize:10,color:"#bbb",marginTop:6,textAlign:"right" }}>
+              Dati reali da estratto conto Revolut Business — non competenza contabile
+            </div>
+          </div>
+        );
+}
+
+// ── CicloCassa CARD ─────────────────────────────────────────────────────────────────
+function CicloCassaCard({ data, metrics, ejercicio, EJERCICIOS }) {
+const ej = EJERCICIOS.find(e=>e.id===ejercicio)||EJERCICIOS[2];
         const todayStr = new Date().toISOString().split("T")[0];
         const inv = data.invoices.filter(i=>{ const d=i.fechaOperacion||i.date||""; return d>=ej.from&&d<=ej.to; });
         const emesse   = inv.filter(i=>i.type==="emessa");
@@ -1504,162 +1635,52 @@ function DashboardTab({ data, metrics, forecast, ejercicio, EJERCICIOS, bimModal
             </div>
           </div>
         );
-      })()}
+}
+
+function DashboardTab({ data, metrics, forecast, ejercicio, EJERCICIOS, bimModal, setBimModal, aeatModal, setAeatModal, exportIvaEsteraCSV }) {
+  return (
+    <div>
+      <div className="section-title" style={{ marginBottom:20 }}>Panoramica</div>
+      <div style={{ display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:14, marginBottom:20 }}>
+        <div className="kpi-card"><div className="kpi-label">Facturado neto</div><div className="kpi-value" style={{ color:"#E30613" }}>{fmt(metrics.fatturato)}</div></div>
+        <div className="kpi-card yellow"><div className="kpi-label">Costes netos</div><div className="kpi-value" style={{ color:"#b8860b" }}>{fmt(metrics.costi)}</div></div>
+        <div className="kpi-card green"><div className="kpi-label">Margen bruto</div><div className="kpi-value" style={{ color:metrics.margine>=0?"#28a745":"#E30613" }}>{fmt(metrics.margine)} <span style={{ fontSize:14, color:"#999" }}>{metrics.marginePerc.toFixed(1)}%</span></div></div>
+        <div className="kpi-card yellow"><div className="kpi-label">Créditos abiertos</div><div className="kpi-value" style={{ color:"#b8860b" }}>{fmt(metrics.creditiAperti)}</div></div>
+        <div className="kpi-card gray"><div className="kpi-label">Débitos abiertos</div><div className="kpi-value" style={{ color:"#666" }}>{fmt(metrics.debitiAperti)}</div></div>
+        <div className="kpi-card blue"><div className="kpi-label">Liquidez estimada</div><div className="kpi-value" style={{ color:metrics.liquidita>=0?"#3949ab":"#E30613" }}>{fmt(metrics.liquidita)}</div></div>
+      </div>
+
+      <IvaAeatCard metrics={metrics} onDetail={()=>setAeatModal(true)} />
+
+      <div className="card" style={{ marginBottom:16 }}>
+        <div style={{ fontSize:10, fontWeight:700, letterSpacing:"1.5px", textTransform:"uppercase", color:"#bbb", marginBottom:12 }}>Forecast liquidez 90 días</div>
+        <ResponsiveContainer width="100%" height={180}>
+          <LineChart data={forecast}>
+            <CartesianGrid strokeDasharray="3 3" stroke="#F5F5F5" />
+            <XAxis dataKey="day" tick={{ fontSize:10, fill:"#bbb" }} interval={4} />
+            <YAxis tick={{ fontSize:10, fill:"#bbb" }} tickFormatter={v=>`${(v/1000).toFixed(0)}k`} />
+            <Tooltip contentStyle={{ background:"white", border:"1.5px solid #E0E0E0", borderRadius:8, fontSize:12 }} formatter={(v)=>[fmt(v),"Liquidità"]} />
+            <ReferenceLine y={0} stroke="rgba(227,6,19,0.3)" strokeDasharray="4 4" />
+            <ReferenceLine y={30000} stroke="rgba(40,167,69,0.3)" strokeDasharray="4 4" />
+            <Line type="monotone" dataKey="balance" stroke="#E30613" strokeWidth={2.5} dot={false} />
+          </LineChart>
+        </ResponsiveContainer>
+      </div>
+
+      {/* ── RECUPERO IVA ESTERA ── */}
+      <IvaEsteraCard data={data} ejercicio={ejercicio} EJERCICIOS={EJERCICIOS} exportIvaEsteraCSV={exportIvaEsteraCSV} setBimModal={setBimModal} />
+
+      {/* ── PANNELLO 1: CICLO DI CASSA (DSO / DPO) ── */}
+            <CicloCassaCard data={data} metrics={metrics} ejercicio={ejercicio} EJERCICIOS={EJERCICIOS} />
 
       {/* ── PANNELLO 2: CASH FLOW REALE DAL BANCO (mensile) ── */}
-      {(() => {
-        if (!data.movements.length) return null;
-        const ej = EJERCICIOS.find(e=>e.id===ejercicio)||EJERCICIOS[2];
-        const byMonth = {};
-        data.movements
-          .filter(m=>{ const d=m.date||""; return d>=ej.from&&d<=ej.to; })
-          .forEach(m=>{
-            const mo = m.date.slice(0,7);
-            if (!byMonth[mo]) byMonth[mo] = { month:m.date.slice(5,7)+"/"+m.date.slice(2,4), entrate:0, uscite:0 };
-            if (m.type==="entrata") byMonth[mo].entrate += parseFloat(m.amount)||0;
-            else                    byMonth[mo].uscite  += parseFloat(m.amount)||0;
-          });
-        const chartData = Object.values(byMonth)
-          .sort((a,b)=>a.month.localeCompare(b.month))
-          .map(d=>({ ...d, netto: d.entrate - d.uscite }));
-        if (!chartData.length) return null;
-        return (
-          <div className="card" style={{ marginBottom:16 }}>
-            <div style={{ fontSize:10,fontWeight:700,letterSpacing:"1.5px",textTransform:"uppercase",color:"#bbb",marginBottom:14 }}>
-              Cash Flow Banco — Mensile reale (movimenti Revolut)
-            </div>
-            <div style={{ display:"flex",gap:16,marginBottom:10,fontSize:11 }}>
-              <span style={{ display:"flex",alignItems:"center",gap:5 }}><span style={{ width:12,height:12,background:"#28a745",borderRadius:2,display:"inline-block" }}/> Entrate</span>
-              <span style={{ display:"flex",alignItems:"center",gap:5 }}><span style={{ width:12,height:12,background:"#3949ab",borderRadius:2,display:"inline-block" }}/> Uscite</span>
-              <span style={{ display:"flex",alignItems:"center",gap:5 }}><span style={{ width:12,height:12,background:"#E30613",borderRadius:2,display:"inline-block" }}/> Netto</span>
-            </div>
-            <ResponsiveContainer width="100%" height={200}>
-              <BarChart data={chartData} barGap={2} barCategoryGap="20%">
-                <CartesianGrid strokeDasharray="3 3" stroke="#F5F5F5" vertical={false} />
-                <XAxis dataKey="month" tick={{ fontSize:11,fill:"#bbb" }} axisLine={false} tickLine={false} />
-                <YAxis tick={{ fontSize:10,fill:"#bbb" }} tickFormatter={v=>v>=1000?`${(v/1000).toFixed(0)}k`:`${v}`} axisLine={false} tickLine={false} />
-                <Tooltip
-                  contentStyle={{ background:"white",border:"1.5px solid #E0E0E0",borderRadius:8,fontSize:12 }}
-                  formatter={(v,n)=>[fmt(v), n==="entrate"?"Entrate":n==="uscite"?"Uscite":"Netto"]}
-                />
-                <ReferenceLine y={0} stroke="rgba(227,6,19,0.3)" strokeDasharray="4 4" />
-                <Bar dataKey="entrate" fill="#28a745" radius={[3,3,0,0]} />
-                <Bar dataKey="uscite"  fill="#3949ab" radius={[3,3,0,0]} />
-                <Bar dataKey="netto" radius={[3,3,0,0]}>
-                  {chartData.map((d,i)=><Cell key={i} fill={d.netto>=0?"#E30613":"#ff6b6b"} />)}
-                </Bar>
-              </BarChart>
-            </ResponsiveContainer>
-            <div style={{ fontSize:10,color:"#bbb",marginTop:6,textAlign:"right" }}>
-              Dati reali da estratto conto Revolut Business — non competenza contabile
-            </div>
-          </div>
-        );
-      })()}
+            <CashFlowMensileCard data={data} metrics={metrics} ejercicio={ejercicio} EJERCICIOS={EJERCICIOS} />
 
       {/* ── PANNELLO 3: CREDITI SCADUTI ── */}
-      {(() => {
-        const todayStr = new Date().toISOString().split("T")[0];
-        const scaduti = data.invoices
-          .filter(i=>i.type==="emessa" && i.status==="aperta" && i.dueDate && i.dueDate < todayStr)
-          .map(i=>({ ...i, giorniScaduto: Math.round((new Date(todayStr)-new Date(i.dueDate))/86400000) }))
-          .sort((a,b)=>b.giorniScaduto-a.giorniScaduto);
-        const aperteNonScadute = data.invoices.filter(i=>i.type==="emessa"&&i.status==="aperta"&&(!i.dueDate||i.dueDate>=todayStr));
-        if (!scaduti.length && !aperteNonScadute.length) return null;
-        return (
-          <div className="card" style={{ marginBottom:16 }}>
-            <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14 }}>
-              <div style={{ fontSize:10,fontWeight:700,letterSpacing:"1.5px",textTransform:"uppercase",color:"#bbb" }}>
-                Crediti — Scaduto e in scadenza
-              </div>
-              {scaduti.length>0 && (
-                <span style={{ background:"#ffebee",border:"1.5px solid #ef9a9a",borderRadius:6,padding:"4px 12px",fontSize:12,fontWeight:800,color:"#E30613" }}>
-                  🔴 {fmt(scaduti.reduce((s,i)=>s+(parseFloat(i.grossAmount)||0),0))} scaduto
-                </span>
-              )}
-            </div>
-            <table>
-              <thead><tr><th>N°</th><th>Cliente</th><th>Scadenza</th><th style={{ textAlign:"right" }}>Giorni</th><th style={{ textAlign:"right" }}>Importo</th><th>Stato</th></tr></thead>
-              <tbody>
-                {scaduti.map(inv=>(
-                  <tr key={inv.id} style={{ background:"#fff5f5" }}>
-                    <td style={{ fontWeight:700,color:"#E30613" }}>{inv.number||"—"}</td>
-                    <td style={{ fontWeight:600 }}>{inv.client||"—"}</td>
-                    <td style={{ color:"#E30613",fontWeight:700 }}>{fmtDate(inv.dueDate)}</td>
-                    <td style={{ textAlign:"right",fontWeight:800,color:"#E30613" }}>+{inv.giorniScaduto}gg</td>
-                    <td style={{ textAlign:"right",fontWeight:700 }}>{fmt(inv.grossAmount)}</td>
-                    <td><span className="badge badge-red">scaduta</span></td>
-                  </tr>
-                ))}
-                {aperteNonScadute.map(inv=>{
-                  const gg = inv.dueDate ? Math.round((new Date(inv.dueDate)-new Date(todayStr))/86400000) : null;
-                  return (
-                    <tr key={inv.id}>
-                      <td style={{ fontWeight:700,color:"#E30613" }}>{inv.number||"—"}</td>
-                      <td style={{ fontWeight:600 }}>{inv.client||"—"}</td>
-                      <td style={{ color:"#999" }}>{fmtDate(inv.dueDate)}</td>
-                      <td style={{ textAlign:"right",color:gg!==null&&gg<=7?"#b8860b":"#bbb" }}>{gg!==null?`${gg}gg`:"—"}</td>
-                      <td style={{ textAlign:"right",fontWeight:700 }}>{fmt(inv.grossAmount)}</td>
-                      <td><span className="badge badge-yellow">aperta</span></td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        );
-      })()}
+            <CreditiScadutiCard data={data} metrics={metrics} ejercicio={ejercicio} EJERCICIOS={EJERCICIOS} />
 
       {/* ── PANNELLO 4: ESPOSIZIONE SUBVETTORI ── */}
-      {(() => {
-        const ej = EJERCICIOS.find(e=>e.id===ejercicio)||EJERCICIOS[2];
-        const ricevute = data.invoices.filter(i=>{
-          const d=i.fechaOperacion||i.date||"";
-          return i.type==="ricevuta" && d>=ej.from && d<=ej.to;
-        });
-        // Raggruppa per fornitore
-        const bySupp = {};
-        ricevute.forEach(i=>{
-          const s = i.supplier || "Altro";
-          if (!bySupp[s]) bySupp[s] = { supplier:s, totale:0, aperte:0, pagato:0 };
-          const net = parseFloat(i.netAmount)||0;
-          bySupp[s].totale += net;
-          if (i.status==="aperta") bySupp[s].aperte += parseFloat(i.grossAmount)||0;
-          else bySupp[s].pagato += net;
-        });
-        const rows = Object.values(bySupp).sort((a,b)=>b.totale-a.totale).slice(0,6);
-        if (!rows.length) return null;
-        const totale = rows.reduce((s,r)=>s+r.totale,0);
-        return (
-          <div className="card">
-            <div style={{ fontSize:10,fontWeight:700,letterSpacing:"1.5px",textTransform:"uppercase",color:"#bbb",marginBottom:14 }}>
-              Esposizione fornitori — {EJERCICIOS.find(e=>e.id===ejercicio)?.label}
-            </div>
-            <table>
-              <thead><tr><th>Fornitore</th><th style={{ textAlign:"right" }}>Totale costi</th><th style={{ textAlign:"right" }}>% su totale</th><th style={{ textAlign:"right" }}>Ancora aperto</th></tr></thead>
-              <tbody>
-                {rows.map(r=>(
-                  <tr key={r.supplier}>
-                    <td style={{ fontWeight:600 }}>{r.supplier}</td>
-                    <td style={{ textAlign:"right" }}>{fmt(r.totale)}</td>
-                    <td style={{ textAlign:"right" }}>
-                      <div style={{ display:"flex",alignItems:"center",justifyContent:"flex-end",gap:8 }}>
-                        <div style={{ width:60,height:4,background:"#F5F5F5",borderRadius:2 }}>
-                          <div style={{ width:`${Math.min(r.totale/totale*100,100)}%`,height:"100%",background:"#3949ab",borderRadius:2 }} />
-                        </div>
-                        <span style={{ fontSize:11,color:"#999" }}>{(r.totale/totale*100).toFixed(0)}%</span>
-                      </div>
-                    </td>
-                    <td style={{ textAlign:"right",fontWeight:r.aperte>0?700:400,color:r.aperte>0?"#E30613":"#bbb" }}>
-                      {r.aperte>0?fmt(r.aperte):"—"}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        );
-      })()}
+            <EsposizioneFornitoriCard data={data} metrics={metrics} ejercicio={ejercicio} EJERCICIOS={EJERCICIOS} />
     </div>
   );
 }
@@ -2261,7 +2282,6 @@ function MovementTable({ movements, invoices, onEdit, onDelete, onReconcile }) {
 }
 
 function InvoiceModal({ inv, onSave, onClose }) {
-  const IVA_TYPES_KEYS = IVA_TYPES; // usa la costante globale, non duplicare
   const [form, setForm] = useState({ ...inv });
 
   const set = (k, v) => setForm(f => {
@@ -2271,7 +2291,7 @@ function InvoiceModal({ inv, onSave, onClose }) {
     if (k==="netAmount" || k==="ivaType") {
       const net  = parseFloat(k==="netAmount" ? v : f.netAmount) || 0;
       const ivaTypeKey = k==="ivaType" ? v : f.ivaType;
-      const rate = (ivaTypeKey in IVA_TYPES_KEYS) ? IVA_TYPES_KEYS[ivaTypeKey] : 0.21;
+      const rate = (ivaTypeKey in IVA_TYPES) ? IVA_TYPES[ivaTypeKey] : 0.21;
       updated.ivaAmount   = parseFloat((net * rate).toFixed(2));
       updated.grossAmount = parseFloat((net + updated.ivaAmount).toFixed(2));
     }
@@ -2340,7 +2360,7 @@ function InvoiceModal({ inv, onSave, onClose }) {
         {/* IVA ordinaria ES */}
         <div className="form-row form-row-2">
           <div><label>Base imponible (€)</label><input type="number" step="0.01" value={form.netAmount||""} onChange={e=>set("netAmount",e.target.value)} /></div>
-          <div><label>Tipo IVA (ES)</label><select value={form.ivaType||"21%"} onChange={e=>set("ivaType",e.target.value)}>{Object.keys(IVA_TYPES_KEYS).map(k=><option key={k}>{k}</option>)}</select></div>
+          <div><label>Tipo IVA (ES)</label><select value={form.ivaType||"21%"} onChange={e=>set("ivaType",e.target.value)}>{Object.keys(IVA_TYPES).map(k=><option key={k}>{k}</option>)}</select></div>
         </div>
         <div className="form-row form-row-2">
           <div><label>IVA ES (€)</label><input readOnly value={form.ivaAmount||0} style={{ color:"#bbb" }} /></div>
@@ -2510,7 +2530,6 @@ function AsientoModal({ asiento, onSave, onClose }) {
   const totalDebe = form.lineas.reduce((s,l)=>s+(parseFloat(l.debe)||0),0);
   const totalHaber = form.lineas.reduce((s,l)=>s+(parseFloat(l.haber)||0),0);
   const cuadra = Math.abs(totalDebe-totalHaber)<0.01;
-  const fmt2 = (n) => new Intl.NumberFormat("es-ES",{style:"currency",currency:"EUR",minimumFractionDigits:2}).format(n||0);
 
   return (
     <div className="modal-overlay" onClick={onClose}>
@@ -2518,7 +2537,7 @@ function AsientoModal({ asiento, onSave, onClose }) {
         <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20 }}>
           <div style={{ display:"flex",alignItems:"center",gap:12 }}>
             <div className="modal-title">{form.id?"Editar asiento":"Nuevo asiento"}</div>
-            <span className={`badge ${cuadra?"badge-green":"badge-red"}`}>{cuadra?"✓ Cuadra":`Diff: ${fmt2(Math.abs(totalDebe-totalHaber))}`}</span>
+            <span className={`badge ${cuadra?"badge-green":"badge-red"}`}>{cuadra?"✓ Cuadra":`Diff: ${fmt(Math.abs(totalDebe-totalHaber))}`}</span>
           </div>
           <button onClick={onClose} style={{ background:"none",fontSize:20,color:"#999" }}>×</button>
         </div>
@@ -2556,15 +2575,15 @@ function AsientoModal({ asiento, onSave, onClose }) {
         <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10,marginBottom:18 }}>
           <div style={{ background:"#e8f5e9",border:"1.5px solid #a5d6a7",borderRadius:8,padding:"10px 14px",textAlign:"center" }}>
             <div style={{ fontSize:10,color:"#28a745",fontWeight:700 }}>DEBE</div>
-            <div style={{ fontWeight:800,color:"#28a745",fontSize:16 }}>{fmt2(totalDebe)}</div>
+            <div style={{ fontWeight:800,color:"#28a745",fontSize:16 }}>{fmt(totalDebe)}</div>
           </div>
           <div style={{ background:"#ffebee",border:"1.5px solid #ef9a9a",borderRadius:8,padding:"10px 14px",textAlign:"center" }}>
             <div style={{ fontSize:10,color:"#E30613",fontWeight:700 }}>HABER</div>
-            <div style={{ fontWeight:800,color:"#E30613",fontSize:16 }}>{fmt2(totalHaber)}</div>
+            <div style={{ fontWeight:800,color:"#E30613",fontSize:16 }}>{fmt(totalHaber)}</div>
           </div>
           <div style={{ background:cuadra?"#e8f5e9":"#ffebee",border:`1.5px solid ${cuadra?"#a5d6a7":"#ef9a9a"}`,borderRadius:8,padding:"10px 14px",textAlign:"center" }}>
             <div style={{ fontSize:10,color:cuadra?"#28a745":"#E30613",fontWeight:700 }}>DIFERENCIA</div>
-            <div style={{ fontWeight:800,color:cuadra?"#28a745":"#E30613",fontSize:16 }}>{cuadra?"✓":fmt2(Math.abs(totalDebe-totalHaber))}</div>
+            <div style={{ fontWeight:800,color:cuadra?"#28a745":"#E30613",fontSize:16 }}>{cuadra?"✓":fmt(Math.abs(totalDebe-totalHaber))}</div>
           </div>
         </div>
         <div className="form-row" style={{ marginBottom:16 }}><label>Notas</label><textarea rows={2} value={form.notas||""} onChange={e=>setField("notas",e.target.value)} /></div>
