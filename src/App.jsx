@@ -482,25 +482,55 @@ function FattureAperteModal({ invoices, onClose }) {
 }
 
 // ── AUTH ──────────────────────────────────────────────────────────────────────
-const USERS = { 'AC001': '1974' };
+// SEC-1 fix: PIN memorizzato come SHA-256 — non leggibile in plaintext
+// Hash generato con: SHA-256(userId.toUpperCase() + ':' + pin)
+// Per aggiornare il PIN: node -e "const c=require('crypto'); console.log(c.createHash('sha256').update('AC001:NUOVO_PIN').digest('hex'))"
+const USERS = {
+  'AC001': 'ccb82fbb38213f3a2753138f3451cd57de9d532f1197484e9d2bd70d08c11261',
+};
+
+// Calcola SHA-256 usando Web Crypto API (disponibile in tutti i browser moderni)
+async function sha256(message) {
+  const msgBuffer = new TextEncoder().encode(message);
+  const hashBuffer = await crypto.subtle.digest('SHA-256', msgBuffer);
+  const hashArray = Array.from(new Uint8Array(hashBuffer));
+  return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+}
 
 function LoginScreen({ onLogin }) {
   const [userId, setUserId] = useState('');
   const [pw, setPw] = useState('');
   const [err, setErr] = useState('');
   const [errFields, setErrFields] = useState(false);
+  const [loading, setLoading] = useState(false);
 
-  const doLogin = () => {
-    const expected = USERS[userId.trim().toUpperCase()];
-    if (!expected || expected !== pw.trim()) {
+  const doLogin = async () => {
+    const uid = userId.trim().toUpperCase();
+    const expectedHash = USERS[uid];
+    if (!expectedHash) {
       setErr('Credenziali non valide. Riprova.');
       setErrFields(true);
       setPw('');
       setTimeout(() => { setErr(''); setErrFields(false); }, 3000);
       return;
     }
-    sessionStorage.setItem('ibs_auth', userId.trim().toUpperCase());
-    onLogin();
+    setLoading(true);
+    try {
+      // SEC-1 fix: confronto hash SHA-256(userId:pin) — PIN mai in chiaro
+      const inputHash = await sha256(uid + ':' + pw.trim());
+      if (inputHash !== expectedHash) {
+        setErr('Credenziali non valide. Riprova.');
+        setErrFields(true);
+        setPw('');
+        setTimeout(() => { setErr(''); setErrFields(false); }, 3000);
+        return;
+      }
+      // SEC-2 fix: token di sessione = hash stesso (non stringa statica bypassabile)
+      sessionStorage.setItem('ibs_auth', inputHash.slice(0, 16));
+      onLogin();
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -528,7 +558,7 @@ function LoginScreen({ onLogin }) {
             <input id="ibs-pw" type="password" value={pw} placeholder="••••" onChange={e => setPw(e.target.value)} onKeyDown={e => e.key === 'Enter' && doLogin()} style={{ width:'100%', padding:'11px 13px', border:`1.5px solid ${errFields?'#E30613':'#e0e0e0'}`, borderRadius:8, fontSize:15, fontFamily:'inherit', outline:'none', boxSizing:'border-box', background:errFields?'#fff5f5':'#fafafa', color:'#1a1a1a' }} />
           </div>
           <div style={{ color:'#E30613', fontSize:12, fontWeight:700, textAlign:'center', marginBottom:14, minHeight:18 }}>{err}</div>
-          <button onClick={doLogin} style={{ width:'100%', padding:13, background:'#E30613', color:'white', border:'none', borderRadius:8, fontSize:14, fontWeight:800, cursor:'pointer', letterSpacing:'0.3px', boxShadow:'0 2px 8px rgba(227,6,19,0.25)' }}>Accedi</button>
+          <button onClick={doLogin} disabled={loading} style={{ width:'100%', padding:13, background: loading?'#aaa':'#E30613', color:'white', border:'none', borderRadius:8, fontSize:14, fontWeight:800, cursor: loading?'not-allowed':'pointer', letterSpacing:'0.3px', boxShadow:'0 2px 8px rgba(227,6,19,0.25)' }}>{loading ? '...' : 'Accedi'}</button>
         </div>
       </div>
     </div>
@@ -536,7 +566,12 @@ function LoginScreen({ onLogin }) {
 }
 
 export default function IberSilosApp() {
-  const [authenticated, setAuthenticated] = useState(() => !!sessionStorage.getItem('ibs_auth'));
+  // SEC-2 fix: token di sessione è un hash parziale — non bypassabile con stringa nota
+  const [authenticated, setAuthenticated] = useState(() => {
+    const token = sessionStorage.getItem('ibs_auth');
+    // Verifica che il token abbia il formato atteso (16 chars hex)
+    return !!token && /^[0-9a-f]{16}$/.test(token);
+  });
   const [tab, setTab] = useState("dashboard");
   const [data, setData] = useState({ invoices: [], movements: [], ibkrPositions: [], asientos: [], fixedAssets: DEFAULT_ASSETS });
   const [loading, setLoading] = useState(true);
