@@ -28,9 +28,10 @@ const STORAGE_KEY = "iber-silos-v2";
 // ── TAX & FINANCIAL CONSTANTS ─────────────────────────────────────────────────
 const IVA_RATES = { IT: 0.22, FR: 0.20, DE: 0.19, AT: 0.20, BE: 0.21, ES: 0.21 };
 const AMORT_RATES = { maquinaria: 0.12, equiposInfo: 0.25, vehiculos: 0.16 };
-// Soglia corretta Direttiva 2008/9/CE: €400 annuo per paese (richiesta annuale),
-// €50 per richiesta trimestrale. Usando finestra annuale → soglia €400.
-const IVA_ESTERA_SOGLIA = 400;
+// Direttiva 2008/9/CE art.17: richiesta annuale (resto anno) → soglia €50;
+// richiesta trimestrale (≥3 mesi) → soglia €400.
+const IVA_ESTERA_SOGLIA_ANNUA = 50;
+const IVA_ESTERA_SOGLIA_TRIM  = 400;
 const IVA_FLAGS = { IT:"🇮🇹", FR:"🇫🇷", DE:"🇩🇪", AT:"🇦🇹", BE:"🇧🇪" };
 // Paesi UE con recupero IVA disponibile per società spagnole (Direttiva 2008/9/CE)
 const PAESI_UE_IVA = [
@@ -97,22 +98,17 @@ const DEFAULT_ASSETS = [
   { id:"comp2", name:"Compresor 2", account:"224", costEur:3000, dateAcq:"2025-01-20", rateAnnual:AMORT_RATES.maquinaria },
 ];
 
-// M-2 fix: calcAmortYear iterativa — elimina ricorsione O(n²)
 function calcAmortYear(asset, year) {
   const acqDate = new Date(asset.dateAcq);
   const acqYear = acqDate.getFullYear();
   if (year < acqYear) return 0;
   const annualAmt = asset.costEur * asset.rateAnnual;
-  // Anno di acquisto: quota proporzionale ai giorni residui
-  if (year === acqYear) {
-    const startDay = Math.floor((acqDate - new Date(acqYear, 0, 1)) / 86400000);
-    return parseFloat(((annualAmt * (365 - startDay)) / 365).toFixed(2));
-  }
-  // Anni successivi: calcolo iterativo (no ricorsione)
-  let accumulated = calcAmortYear(asset, acqYear);
+  const acqStartDay = Math.floor((acqDate - new Date(acqYear, 0, 1)) / 86400000);
+  const acqYearQuota = parseFloat(((annualAmt * (365 - acqStartDay)) / 365).toFixed(2));
+  if (year === acqYear) return acqYearQuota;
+  let accumulated = acqYearQuota;
   for (let y = acqYear + 1; y < year; y++) {
-    const residuo = asset.costEur - accumulated;
-    accumulated += Math.min(annualAmt, Math.max(0, residuo));
+    accumulated += Math.min(annualAmt, Math.max(0, asset.costEur - accumulated));
   }
   return Math.min(annualAmt, Math.max(0, asset.costEur - accumulated));
 }
@@ -159,8 +155,9 @@ async function loadData() {
   } catch {}
   return { invoices: [], movements: [], ibkrPositions: [], asientos: [], fixedAssets: DEFAULT_ASSETS };
 }
-async function saveData(data) {
-  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(data)); } catch {}
+function saveData(data, onError) {
+  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(data)); }
+  catch (e) { if (onError) onError("⚠ Errore salvataggio: " + e.message); }
 }
 
 // ── RECONCILIATION ────────────────────────────────────────────────────────────
@@ -503,8 +500,25 @@ function LoginScreen({ onLogin }) {
   const [err, setErr] = useState('');
   const [errFields, setErrFields] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [attempts, setAttempts] = useState(() => {
+    const a = sessionStorage.getItem('ibs_attempts');
+    return a ? parseInt(a, 10) : 0;
+  });
+  const [lockedUntil, setLockedUntil] = useState(() => {
+    const t = sessionStorage.getItem('ibs_locked');
+    return t ? parseInt(t, 10) : 0;
+  });
+
+  const MAX_ATTEMPTS = 5;
+  const LOCKOUT_MS = 5 * 60 * 1000; // 5 minuti
 
   const doLogin = async () => {
+    const now = Date.now();
+    if (lockedUntil > now) {
+      const remaining = Math.ceil((lockedUntil - now) / 1000);
+      setErr(`Troppi tentativi. Riprova tra ${remaining}s.`);
+      return;
+    }
     const uid = userId.trim().toUpperCase();
     const expectedHash = USERS[uid];
     if (!expectedHash) {
@@ -516,17 +530,27 @@ function LoginScreen({ onLogin }) {
     }
     setLoading(true);
     try {
-      // SEC-1 fix: confronto hash SHA-256(userId:pin) — PIN mai in chiaro
       const inputHash = await sha256(uid + ':' + pw.trim());
       if (inputHash !== expectedHash) {
-        setErr('Credenziali non valide. Riprova.');
+        const newAttempts = attempts + 1;
+        setAttempts(newAttempts);
+        sessionStorage.setItem('ibs_attempts', newAttempts);
+        if (newAttempts >= MAX_ATTEMPTS) {
+          const until = Date.now() + LOCKOUT_MS;
+          setLockedUntil(until);
+          sessionStorage.setItem('ibs_locked', until);
+          setErr(`Accesso bloccato per 5 minuti.`);
+        } else {
+          setErr(`Credenziali non valide. Tentativi rimasti: ${MAX_ATTEMPTS - newAttempts}`);
+        }
         setErrFields(true);
         setPw('');
-        setTimeout(() => { setErr(''); setErrFields(false); }, 3000);
+        setTimeout(() => { setErr(''); setErrFields(false); }, 4000);
         return;
       }
-      // SEC-2 fix: token di sessione = hash stesso (non stringa statica bypassabile)
-      sessionStorage.setItem('ibs_auth', inputHash.slice(0, 16));
+      sessionStorage.setItem('ibs_auth', inputHash);
+      sessionStorage.removeItem('ibs_attempts');
+      sessionStorage.removeItem('ibs_locked');
       onLogin();
     } finally {
       setLoading(false);
@@ -566,11 +590,9 @@ function LoginScreen({ onLogin }) {
 }
 
 export default function IberSilosApp() {
-  // SEC-2 fix: token di sessione è un hash parziale — non bypassabile con stringa nota
   const [authenticated, setAuthenticated] = useState(() => {
     const token = sessionStorage.getItem('ibs_auth');
-    // Verifica che il token abbia il formato atteso (16 chars hex)
-    return !!token && /^[0-9a-f]{16}$/.test(token);
+    return !!token && Object.values(USERS).includes(token);
   });
   const [tab, setTab] = useState("dashboard");
   const [data, setData] = useState({ invoices: [], movements: [], ibkrPositions: [], asientos: [], fixedAssets: DEFAULT_ASSETS });
@@ -593,7 +615,7 @@ export default function IberSilosApp() {
 
   useEffect(() => { loadData().then(d => { setData(d); setLoading(false); }); }, []);
 
-  const persist = useCallback(async (newData) => { setData(newData); await saveData(newData); }, []);
+  const persist = useCallback((newData) => { setData(newData); saveData(newData, (msg) => showToast(msg, "err")); }, [showToast]);
 
   const showToast = useCallback((msg, type = "ok") => { setToast({ msg, type }); setTimeout(() => setToast(null), 3000); }, []);
 
@@ -801,7 +823,6 @@ export default function IberSilosApp() {
   const metrics = useMemo(() => {
     const ej = EJERCICIOS.find(e=>e.id===ejercicio)||EJERCICIOS[2];
     const inv = data.invoices.filter(i=>{ const d=i.fechaOperacion||i.date||""; return d>=ej.from&&d<=ej.to; });
-    const mov = data.movements.filter(m=>{ const d=m.date||""; return d>=ej.from&&d<=ej.to; });
     const emesse = inv.filter(i=>i.type==="emessa"), ricevute = inv.filter(i=>i.type==="ricevuta");
     const fatturato = emesse.reduce((s,i)=>s+(parseFloat(i.netAmount)||0),0);
     const costi = ricevute.reduce((s,i)=>s+(parseFloat(i.netAmount)||0),0);
@@ -812,9 +833,8 @@ export default function IberSilosApp() {
     const ivaSop = ricevute.reduce((s,i)=>s+(parseFloat(i.ivaAmount)||0),0);
     const ivaRep = emesse.reduce((s,i)=>s+(parseFloat(i.ivaAmount)||0),0);
     const ivaCredito = ivaSop - ivaRep;
-    const ivaDevol = data.movements.filter(m=>m.type==="entrata"&&(m.description||"").includes("AEAT")).reduce((s,m)=>s+(parseFloat(m.amount)||0),0);
+    const ivaDevol = data.movements.filter(m=>m.isAeatRefund===true||(m.type==="entrata"&&/AEAT.*(IVA|DEVOLUCI[OÓ]N|REDEME|303)/i.test(m.description||""))).reduce((s,m)=>s+(parseFloat(m.amount)||0),0);
     return { fatturato, costi, margine:fatturato-costi, creditiAperti, debitiAperti, liquidita, marginePerc:fatturato>0?(fatturato-costi)/fatturato*100:0, ivaSop, ivaRep, ivaCredito, ivaDevol };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [data.invoices, data.movements, ejercicio]);
 
   const forecast = useMemo(() => buildForecast(data.invoices, data.movements), [data.invoices, data.movements]);
@@ -1125,7 +1145,7 @@ export default function IberSilosApp() {
               <button onClick={()=>setBimModal(false)} style={{ background:"none",fontSize:20,color:"#999" }}>×</button>
             </div>
             <div style={{ background:"#fffde7",border:"1.5px solid #ffe082",borderRadius:8,padding:"10px 14px",marginBottom:18,fontSize:12,color:"#b8860b" }}>
-              Procedura annuale (Direttiva 2008/9/CE) · Scadenza: <strong>30/09 anno successivo</strong> · Soglia: <strong>€{IVA_ESTERA_SOGLIA} annuo per paese</strong> (€50 per richiesta trimestrale)
+              Procedura annuale (Direttiva 2008/9/CE) · Scadenza: <strong>30/09 anno successivo</strong> · Soglia: <strong>€{IVA_ESTERA_SOGLIA_ANNUA} annuo</strong> (richiesta annuale) · <strong>€{IVA_ESTERA_SOGLIA_TRIM} trimestrale</strong>
             </div>
             {[
               { paese:"🇮🇹 Italia", codice:"IT", aliquota:IVA_RATES.IT, note:"Pedaggi autostradali Italia via gestore prepagato (Euro Service GmbH). Targa GR516KN.", procedura:"Portale VIES + modulo elettronico Agenzia Entrate italiana. Documenti: fatture IT + estratto conto + delega.", normativa:"Dir. 2008/9/CE — rimborso IVA UE" },
@@ -1143,7 +1163,7 @@ export default function IberSilosApp() {
                   </div>
                   <div style={{ background:"#FAFAFA",borderRadius:6,padding:"8px 10px" }}>
                     <div style={{ fontSize:10,color:"#bbb",fontWeight:700 }}>SOGLIA MIN.</div>
-                    <div style={{ fontWeight:800,fontSize:18,color:"#28a745" }}>€100</div>
+                    <div style={{ fontWeight:800,fontSize:18,color:"#28a745" }}>€{IVA_ESTERA_SOGLIA_TRIM}</div>
                     <div style={{ fontSize:10,color:"#bbb" }}>IVA/trimestre</div>
                   </div>
                 </div>
@@ -1370,13 +1390,13 @@ function IvaEsteraCard({ data, ejercicio, EJERCICIOS, exportIvaEsteraCSV, setBim
       {/* Totale annuo — badge prominente */}
       <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",
         padding:"12px 16px",borderRadius:8,marginBottom:14,
-        background: totAnnuo.tot>=IVA_ESTERA_SOGLIA?"#e8f5e9":"#fffde7",
-        border:`1.5px solid ${totAnnuo.tot>=IVA_ESTERA_SOGLIA?"#a5d6a7":"#ffe082"}` }}>
+        background: totAnnuo.tot>=IVA_ESTERA_SOGLIA_ANNUA?"#e8f5e9":"#fffde7",
+        border:`1.5px solid ${totAnnuo.tot>=IVA_ESTERA_SOGLIA_ANNUA?"#a5d6a7":"#ffe082"}` }}>
         <div>
           <div style={{ fontSize:10,fontWeight:700,color:"#999",textTransform:"uppercase",letterSpacing:"0.1em",marginBottom:2 }}>
             Totale recuperabile {anno}
           </div>
-          <div style={{ fontSize:26,fontWeight:800,color:totAnnuo.tot>=IVA_ESTERA_SOGLIA?"#28a745":"#b8860b" }}>
+          <div style={{ fontSize:26,fontWeight:800,color:totAnnuo.tot>=IVA_ESTERA_SOGLIA_ANNUA?"#28a745":"#b8860b" }}>
             {fmt(totAnnuo.tot)}
           </div>
           {hasDati && (
@@ -1392,9 +1412,9 @@ function IvaEsteraCard({ data, ejercicio, EJERCICIOS, exportIvaEsteraCSV, setBim
           )}
         </div>
         <div style={{ textAlign:"right" }}>
-          {totAnnuo.tot >= IVA_ESTERA_SOGLIA
-            ? <div style={{ fontSize:11,color:"#28a745",fontWeight:700 }}>✓ Soglia €{IVA_ESTERA_SOGLIA} superata<br/>Aprire pratica Hacienda</div>
-            : <div style={{ fontSize:11,color:"#b8860b" }}>⚠ Sotto soglia €{IVA_ESTERA_SOGLIA} annua<br/>Valutare se conviene</div>
+          {totAnnuo.tot >= IVA_ESTERA_SOGLIA_ANNUA
+            ? <div style={{ fontSize:11,color:"#28a745",fontWeight:700 }}>✓ Soglia €{IVA_ESTERA_SOGLIA_ANNUA} annua superata<br/>Aprire pratica Hacienda</div>
+            : <div style={{ fontSize:11,color:"#b8860b" }}>⚠ Sotto soglia €{IVA_ESTERA_SOGLIA_ANNUA} annua<br/>Valutare se conviene</div>
           }
           <div style={{ fontSize:10,color:"#bbb",marginTop:4 }}>Scad. annuale: 30/09/{parseInt(anno)+1}</div>
         </div>

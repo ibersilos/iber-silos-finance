@@ -1,10 +1,8 @@
 {
   "rules": {
     "finance": {
-      "AC001": {
-        ".read": true,
-        ".write": true
-      }
+      ".read": false,
+      ".write": false
     }
   }
 }
