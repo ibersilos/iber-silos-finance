@@ -633,9 +633,9 @@ export default function IberSilosApp() {
 
   useEffect(() => { loadData().then(d => { setData(d); setLoading(false); }); }, []);
 
-  const persist = useCallback((newData) => { setData(newData); saveData(newData, (msg) => showToast(msg, "err")); }, [showToast]);
-
   const showToast = useCallback((msg, type = "ok") => { setToast({ msg, type }); setTimeout(() => setToast(null), type === "err" ? 6000 : 3000); }, []);
+
+  const persist = useCallback((newData) => { setData(newData); saveData(newData, (msg) => showToast(msg, "err")); }, [showToast]);
 
   const saveInvoice = (inv) => {
     const net = parseFloat(inv.netAmount) || 0;
