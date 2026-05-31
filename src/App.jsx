@@ -478,6 +478,23 @@ function FattureAperteModal({ invoices, onClose }) {
   );
 }
 
+// ── CONFIRM MODAL ─────────────────────────────────────────────────────────────
+function ConfirmModal({ message, onConfirm, onCancel }) {
+  return (
+    <div className="modal-overlay" onClick={onCancel}>
+      <div className="modal" style={{ maxWidth:360 }} onClick={e=>e.stopPropagation()}>
+        <div style={{ fontSize:32, textAlign:"center", marginBottom:12 }}>🗑️</div>
+        <div style={{ fontSize:15, fontWeight:700, textAlign:"center", marginBottom:8 }}>¿Confirmar eliminación?</div>
+        <div style={{ fontSize:13, color:"#666", textAlign:"center", marginBottom:24 }}>{message || "Esta acción no se puede deshacer."}</div>
+        <div style={{ display:"flex", gap:10 }}>
+          <button className="btn-ghost" style={{ flex:1 }} onClick={onCancel}>Cancelar</button>
+          <button className="btn-red" style={{ flex:1 }} onClick={onConfirm}>Eliminar</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── AUTH ──────────────────────────────────────────────────────────────────────
 // SEC-1 fix: PIN memorizzato come SHA-256 — non leggibile in plaintext
 // Hash generato con: SHA-256(userId.toUpperCase() + ':' + pin)
@@ -598,6 +615,7 @@ export default function IberSilosApp() {
   const [data, setData] = useState({ invoices: [], movements: [], ibkrPositions: [], asientos: [], fixedAssets: DEFAULT_ASSETS });
   const [loading, setLoading] = useState(true);
   const [toast, setToast] = useState(null);
+  const [confirmModal, setConfirmModal] = useState(null); // { message, onConfirm }
   const [invoiceModal, setInvoiceModal] = useState(null);
   const [movModal, setMovModal] = useState(null);
   const [reconcileModal, setReconcileModal] = useState(null);
@@ -617,7 +635,7 @@ export default function IberSilosApp() {
 
   const persist = useCallback((newData) => { setData(newData); saveData(newData, (msg) => showToast(msg, "err")); }, [showToast]);
 
-  const showToast = useCallback((msg, type = "ok") => { setToast({ msg, type }); setTimeout(() => setToast(null), 3000); }, []);
+  const showToast = useCallback((msg, type = "ok") => { setToast({ msg, type }); setTimeout(() => setToast(null), type === "err" ? 6000 : 3000); }, []);
 
   const saveInvoice = (inv) => {
     const net = parseFloat(inv.netAmount) || 0;
@@ -653,7 +671,7 @@ export default function IberSilosApp() {
     setInvoiceModal(null);
     showToast(exists ? "Factura actualizada" : "Factura añadida");
   };
-  const deleteInvoice = (id) => { if (!confirm("¿Eliminar?")) return; persist({ ...data, invoices: data.invoices.filter(i => i.id !== id) }); showToast("Eliminada", "warn"); };
+  const deleteInvoice = (id) => setConfirmModal({ message:"Se eliminará la factura.", onConfirm: () => { persist({ ...data, invoices: data.invoices.filter(i => i.id !== id) }); showToast("Factura eliminada", "warn"); setConfirmModal(null); } });
 
   const saveMov = (mov) => {
     const final = { ...mov, id: mov.id || `mov-${Date.now()}` };
@@ -661,7 +679,7 @@ export default function IberSilosApp() {
     const movements = exists ? data.movements.map(m => m.id === final.id ? final : m) : [...data.movements, final];
     persist({ ...data, movements }); setMovModal(null); showToast(exists ? "Actualizado" : "Añadido");
   };
-  const deleteMov = (id) => { if (!confirm("¿Eliminar?")) return; persist({ ...data, movements: data.movements.filter(m => m.id !== id) }); showToast("Eliminado", "warn"); };
+  const deleteMov = (id) => setConfirmModal({ message:"Se eliminará el movimiento.", onConfirm: () => { persist({ ...data, movements: data.movements.filter(m => m.id !== id) }); showToast("Movimiento eliminado", "warn"); setConfirmModal(null); } });
 
   const saveIbkr = (pos) => {
     const shares = parseFloat(pos.shares) || 0, price = parseFloat(pos.priceEur) || 0, fees = parseFloat(pos.fees) || 0;
@@ -670,7 +688,7 @@ export default function IberSilosApp() {
     const ibkrPositions = exists ? (data.ibkrPositions||[]).map(p => p.id===final.id?final:p) : [...(data.ibkrPositions||[]), final];
     persist({ ...data, ibkrPositions }); setIbkrModal(null); showToast(exists ? "Actualizado" : "Añadido");
   };
-  const deleteIbkr = (id) => { if (!confirm("¿Eliminar?")) return; persist({ ...data, ibkrPositions: (data.ibkrPositions||[]).filter(p => p.id!==id) }); showToast("Eliminado", "warn"); };
+  const deleteIbkr = (id) => setConfirmModal({ message:"Se eliminará la operación IBKR.", onConfirm: () => { persist({ ...data, ibkrPositions: (data.ibkrPositions||[]).filter(p => p.id!==id) }); showToast("Operación eliminada", "warn"); setConfirmModal(null); } });
 
   const saveAsiento = (asiento) => {
     const lineas = asiento.lineas.filter(l => l.cuenta && (parseFloat(l.debe)||parseFloat(l.haber)));
@@ -684,19 +702,19 @@ export default function IberSilosApp() {
     persist({ ...data, asientos: exists ? asientos.map(a => a.id===final.id?final:a) : [...asientos, final] });
     setAsientoModal(null); showToast(`Asiento ${numero} registrado `);
   };
-  const deleteAsiento = (id) => { if (!confirm("¿Eliminar?")) return; persist({ ...data, asientos: (data.asientos||[]).filter(a => a.id!==id) }); showToast("Eliminado", "warn"); };
+  const deleteAsiento = (id) => setConfirmModal({ message:"Se eliminará el asiento contable.", onConfirm: () => { persist({ ...data, asientos: (data.asientos||[]).filter(a => a.id!==id) }); showToast("Asiento eliminado", "warn"); setConfirmModal(null); } });
 
   const runAutoReconcile = () => {
     const movements = autoReconcile(data.movements, data.invoices);
     const matched = movements.filter(m => m._autoMatch).length;
     const invoices = data.invoices.map(inv => { const hasMatch = movements.find(m => m.invoiceId===inv.id&&m.reconciled); return hasMatch ? {...inv, status:"riconciliata"} : inv; });
     persist({ ...data, movements: movements.map(m => { const c={...m}; delete c._autoMatch; return c; }), invoices });
-    showToast(`Riconciliazione: ${matched} abbinamenti automatici`);
+    showToast(`Conciliación: ${matched} asociaciones automáticas`);
   };
   const manualReconcile = (movId, invId) => {
     const movements = data.movements.map(m => m.id===movId ? {...m, invoiceId:invId, reconciled:true} : m);
     const invoices = data.invoices.map(inv => inv.id===invId ? {...inv, status:"riconciliata"} : inv);
-    persist({ ...data, movements, invoices }); setReconcileModal(null); showToast("Riconciliazione salvata");
+    persist({ ...data, movements, invoices }); setReconcileModal(null); showToast("Conciliación guardada");
   };
 
   const importPDF = async (e) => {
@@ -710,7 +728,7 @@ export default function IberSilosApp() {
       const newMovs = parsed.filter(m => !existing.has(`${m.date}-${m.amount}-${m.description}`));
       if (!newMovs.length) { showToast("Sin nuevos movimientos (già importati)", "warn"); return; }
       persist({ ...data, movements: [...data.movements, ...newMovs] });
-      showToast(`✅ Importati ${newMovs.length} movimenti da PDF (${parsed.length - newMovs.length} già presenti)`);
+      showToast(`✅ Importados ${newMovs.length} movimientos del PDF (${parsed.length - newMovs.length} ya presentes)`);
     } catch (err) {
       showToast("Errore PDF: " + err.message, "err");
     }
@@ -757,7 +775,7 @@ export default function IberSilosApp() {
     persist(importConfirmModal.parsed);
     const s = importConfirmModal.summary;
     setImportConfirmModal(null);
-    showToast(`✓ Importati: ${s.invoices} fatture · ${s.movements} movimenti · ${s.asientos} asientos`);
+    showToast(`✓ Importados: ${s.invoices} facturas · ${s.movements} movimientos · ${s.asientos} asientos`);
   };
 
   const exportContabCSV = () => {
@@ -839,6 +857,24 @@ export default function IberSilosApp() {
 
   const forecast = useMemo(() => buildForecast(data.invoices, data.movements), [data.invoices, data.movements]);
 
+  const pacSummary = useMemo(() => {
+    const positions = data.ibkrPositions || [];
+    const byTicker = {};
+    positions.forEach(p => {
+      if (!byTicker[p.ticker]) byTicker[p.ticker] = { shares:0, totalInvested:0 };
+      const shares = parseFloat(p.shares)||0, total = parseFloat(p.totalEur)||0;
+      if (p.type==="acquisto") { byTicker[p.ticker].shares+=shares; byTicker[p.ticker].totalInvested+=total; }
+      else { byTicker[p.ticker].shares-=shares; byTicker[p.ticker].totalInvested-=total; }
+    });
+    return {
+      byTicker,
+      totalInvested: Object.values(byTicker).reduce((s,t)=>s+t.totalInvested,0),
+      lastOp: [...positions].reverse()[0] || null,
+      pacTarget: getPacAmount(today()),
+      count: positions.length,
+    };
+  }, [data.ibkrPositions]);
+
   if (!authenticated) return <LoginScreen onLogin={() => setAuthenticated(true)} />;
 
   if (loading) return (
@@ -850,14 +886,16 @@ export default function IberSilosApp() {
     </div>
   );
 
+  const scaduteCount = data.invoices.filter(i => i.status === "aperta" && i.dueDate && i.dueDate < today()).length;
+
   const TABS = [
-    ["dashboard","","Dashboard"],
-    ["fatture","","Facturas"],
-    ["movimenti","","Movimientos"],
-    ["riconciliazione","","Conciliación"],
-    ["forecast","","Forecast"],
-    ["ibkr","","IBKR SL"],
-    ["contabilidad","","Contabilidad"],
+    ["dashboard","📊","Dashboard"],
+    ["fatture","🧾","Facturas"],
+    ["movimenti","🏦","Movimientos"],
+    ["riconciliazione","🔗","Conciliación"],
+    ["forecast","📈","Forecast"],
+    ["ibkr","💹","IBKR SL"],
+    ["contabilidad","📒","Contabilidad"],
   ];
 
   return (
@@ -935,7 +973,7 @@ export default function IberSilosApp() {
             )}
           </button>
           <button className="btn-ghost" onClick={exportJSON} style={{ fontSize:11 }}>↓ Backup</button>
-          <button className="btn-ghost" onClick={() => fileRef.current.click()} style={{ fontSize:11 }}>↑ Importa</button>
+          <button className="btn-ghost" onClick={() => fileRef.current.click()} style={{ fontSize:11 }}>↑ Importar</button>
           <input ref={fileRef} type="file" accept=".json" onChange={importJSON} style={{ display:"none" }} />
         </div>
       </header>
@@ -943,28 +981,23 @@ export default function IberSilosApp() {
       <div style={{ display:"flex", flex:1, overflow:"hidden" }}>
         <aside style={{ width:200, background:"white", borderRight:"1px solid #E0E0E0", display:"flex", flexDirection:"column", flexShrink:0, overflowY:"auto" }}>
           <div style={{ padding:"10px 0", borderBottom:"1px solid #F5F5F5" }}>
-            <div style={{ fontSize:9, fontWeight:700, letterSpacing:"2px", textTransform:"uppercase", color:"#bbb", padding:"4px 16px 8px" }}>Navigazione</div>
+            <div style={{ fontSize:9, fontWeight:700, letterSpacing:"2px", textTransform:"uppercase", color:"#bbb", padding:"4px 16px 8px" }}>Navegación</div>
             {TABS.map(([id, icon, label]) => (
               <button key={id} className={`nav-item ${tab===id?"active":""}`} onClick={() => setTab(id)}>
                 <span style={{ fontSize:15 }}>{icon}</span>
-                <span>{label}</span>
+                <span style={{ flex:1 }}>{label}</span>
+                {id === "fatture" && scaduteCount > 0 && (
+                  <span style={{ background:"#E30613", color:"white", borderRadius:10, fontSize:9, fontWeight:800, padding:"1px 6px", minWidth:16, textAlign:"center" }}>
+                    {scaduteCount}
+                  </span>
+                )}
               </button>
             ))}
           </div>
           <div style={{ padding:"14px 14px 10px", borderTop:"1px solid #F5F5F5", marginTop:"auto" }}>
             <div style={{ fontSize:9, fontWeight:700, letterSpacing:"1.5px", textTransform:"uppercase", color:"#bbb", marginBottom:10 }}>PAC IBKR SL</div>
             {(() => {
-              const positions = data.ibkrPositions || [];
-              const byTicker = {};
-              positions.forEach(p => {
-                if (!byTicker[p.ticker]) byTicker[p.ticker] = { shares:0, totalInvested:0 };
-                const shares = parseFloat(p.shares)||0, total = parseFloat(p.totalEur)||0;
-                if (p.type==="acquisto") { byTicker[p.ticker].shares+=shares; byTicker[p.ticker].totalInvested+=total; }
-                else { byTicker[p.ticker].shares-=shares; byTicker[p.ticker].totalInvested-=total; }
-              });
-              const totalInvested = Object.values(byTicker).reduce((s,t)=>s+t.totalInvested,0);
-              const lastOp = [...positions].reverse()[0];
-              const pacTarget = getPacAmount(today());
+              const { byTicker, totalInvested, lastOp, pacTarget, count } = pacSummary;
               return (
                 <>
                   <div style={{ background:"#FFF5F5", borderRadius:8, padding:"10px 12px", marginBottom:8 }}>
@@ -978,7 +1011,7 @@ export default function IberSilosApp() {
                     </div>
                     <div style={{ background:"#F5F5F5", borderRadius:6, padding:"7px 8px", textAlign:"center" }}>
                       <div style={{ fontSize:9, color:"#bbb", fontWeight:700 }}>OPERACIONES</div>
-                      <div style={{ fontSize:13, fontWeight:800 }}>{positions.length}</div>
+                      <div style={{ fontSize:13, fontWeight:800 }}>{count}</div>
                     </div>
                   </div>
                   {Object.entries(byTicker).filter(([,t])=>t.shares>0.0001).map(([ticker, t]) => (
@@ -1034,11 +1067,11 @@ export default function IberSilosApp() {
           {tab==="riconciliazione" && (
             <div>
               <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:20 }}>
-                <div className="section-title">Riconciliazione</div>
+                <div className="section-title">Conciliación</div>
                 <button className="btn-red" onClick={runAutoReconcile}> Auto-riconcilia</button>
               </div>
               <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:14, marginBottom:20 }}>
-                <div className="kpi-card green"><div className="kpi-label">Fatture riconciliate</div><div className="kpi-value">{data.invoices.filter(i=>i.status==="riconciliata").length}<span style={{ fontSize:14,color:"#bbb",marginLeft:6 }}>/ {data.invoices.length}</span></div></div>
+                <div className="kpi-card green"><div className="kpi-label">Facturas conciliadas</div><div className="kpi-value">{data.invoices.filter(i=>i.status==="riconciliata").length}<span style={{ fontSize:14,color:"#bbb",marginLeft:6 }}>/ {data.invoices.length}</span></div></div>
                 <div className="kpi-card blue"><div className="kpi-label">Movimientos asociados</div><div className="kpi-value">{data.movements.filter(m=>m.reconciled).length}<span style={{ fontSize:14,color:"#bbb",marginLeft:6 }}>/ {data.movements.length}</span></div></div>
               </div>
               <div className="card">
@@ -1061,14 +1094,14 @@ export default function IberSilosApp() {
 
           {tab==="forecast" && (
             <div>
-              <div className="section-title" style={{ marginBottom:20 }}>Forecast Cash Flow — 90 giorni</div>
+              <div className="section-title" style={{ marginBottom:20 }}>Forecast Cash Flow — 90 días</div>
               <div style={{ display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:14, marginBottom:20 }}>
-                <div className="kpi-card blue"><div className="kpi-label">Liquidità attuale</div><div className="kpi-value" style={{ color:"#3949ab" }}>{fmt(metrics.liquidita)}</div></div>
-                <div className="kpi-card green"><div className="kpi-label">Entrate attese 90gg</div><div className="kpi-value" style={{ color:"#28a745" }}>{fmt(data.invoices.filter(i=>i.type==="emessa"&&i.status==="aperta").reduce((s,i)=>s+(parseFloat(i.grossAmount)||0),0))}</div></div>
-                <div className="kpi-card"><div className="kpi-label">Uscite attese 90gg</div><div className="kpi-value" style={{ color:"#E30613" }}>{fmt(data.invoices.filter(i=>i.type==="ricevuta"&&i.status==="aperta").reduce((s,i)=>s+(parseFloat(i.grossAmount)||0),0))}</div></div>
+                <div className="kpi-card blue"><div className="kpi-label">Liquidez actual</div><div className="kpi-value" style={{ color:"#3949ab" }}>{fmt(metrics.liquidita)}</div></div>
+                <div className="kpi-card green"><div className="kpi-label">Cobros esperados 90d</div><div className="kpi-value" style={{ color:"#28a745" }}>{fmt(data.invoices.filter(i=>i.type==="emessa"&&i.status==="aperta").reduce((s,i)=>s+(parseFloat(i.grossAmount)||0),0))}</div></div>
+                <div className="kpi-card"><div className="kpi-label">Pagos esperados 90d</div><div className="kpi-value" style={{ color:"#E30613" }}>{fmt(data.invoices.filter(i=>i.type==="ricevuta"&&i.status==="aperta").reduce((s,i)=>s+(parseFloat(i.grossAmount)||0),0))}</div></div>
               </div>
               <div className="card" style={{ marginBottom:16 }}>
-                <div style={{ fontSize:10,fontWeight:700,letterSpacing:"1.5px",textTransform:"uppercase",color:"#bbb",marginBottom:14 }}>Proiezione saldo</div>
+                <div style={{ fontSize:10,fontWeight:700,letterSpacing:"1.5px",textTransform:"uppercase",color:"#bbb",marginBottom:14 }}>Proyección saldo</div>
                 <ResponsiveContainer width="100%" height={280}>
                   <LineChart data={forecast}>
                     <CartesianGrid strokeDasharray="3 3" stroke="#F5F5F5" />
@@ -1107,7 +1140,7 @@ export default function IberSilosApp() {
         <div className="modal-overlay" onClick={()=>setReconcileModal(null)}>
           <div className="modal" onClick={e=>e.stopPropagation()}>
             <div style={{ display:"flex",justifyContent:"space-between",marginBottom:18 }}>
-              <div className="modal-title">Abbina movimento</div>
+              <div className="modal-title">Asociar movimiento</div>
               <button onClick={()=>setReconcileModal(null)} style={{ background:"none",fontSize:20,color:"#999" }}>×</button>
             </div>
             <div style={{ background:"#FFF5F5",border:"1.5px solid #ef9a9a",borderRadius:8,padding:14,marginBottom:18,fontSize:13 }}>
@@ -1136,6 +1169,7 @@ export default function IberSilosApp() {
       )}
       {asientoModal && <AsientoModal asiento={asientoModal} onSave={saveAsiento} onClose={()=>setAsientoModal(null)} />}
 
+      {confirmModal && <ConfirmModal message={confirmModal.message} onConfirm={confirmModal.onConfirm} onCancel={()=>setConfirmModal(null)} />}
       {aeatModal && <AeatModal data={data} ejercicio={ejercicio} EJERCICIOS={EJERCICIOS} onClose={()=>setAeatModal(false)} />}
       {bimModal && (
         <div className="modal-overlay" onClick={()=>setBimModal(false)}>
@@ -1660,7 +1694,7 @@ const ej = EJERCICIOS.find(e=>e.id===ejercicio)||EJERCICIOS[2];
                 {dso===null?"—":`${dso}gg`}
               </div>
               <div style={{ fontSize:11,color:"#999",marginTop:4 }}>
-                {dso===null?"Nessuna fattura riconciliata":dso<=30?"✓ Sotto 30 giorni":dso<=45?"⚠ Attenzione":"🔴 Alto rischio liquidità"}
+                {dso===null?"Sin facturas conciliadas":dso<=30?"✓ Bajo 30 días":dso<=45?"⚠ Atención":"🔴 Alto riesgo de liquidez"}
               </div>
               <div style={{ fontSize:10,color:"#bbb",marginTop:2 }}>Su {dsoCalcs.length} fatture riconciliate</div>
             </div>
@@ -2145,7 +2179,7 @@ function ContabilidadTab({ data, persist, contabView, setContabView, mayorCuenta
             <div style={{ fontWeight:800,fontSize:15 }}>Balance de Sumas y Saldos</div>
             <span className={`badge ${cuadra?"badge-green":"badge-red"}`}>{cuadra?"✓ CUADRA":"✗ NO CUADRA"}</span>
           </div>
-          {cuentasUsadas.length===0 ? <div style={{ color:"#bbb",fontSize:13 }}>Registra asientos per vedere il balance.</div> :
+          {cuentasUsadas.length===0 ? <div style={{ color:"#bbb",fontSize:13 }}>Registra asientos para ver el balance.</div> :
             <table>
               <thead><tr><th>Cuenta</th><th>Nombre</th><th style={{ textAlign:"right" }}>Sumas Debe</th><th style={{ textAlign:"right" }}>Sumas Haber</th><th style={{ textAlign:"right" }}>Saldo D</th><th style={{ textAlign:"right" }}>Saldo H</th></tr></thead>
               <tbody>{cuentasUsadas.map((a)=>{
@@ -2306,7 +2340,7 @@ function MovementTable({ movements, invoices, onEdit, onDelete, onReconcile }) {
   invoices.forEach(i=>{ invMap[i.id]=i; });
   return (
     <div className="card">
-      <span style={{ color:"#bbb",fontSize:11,fontWeight:600,display:"block",marginBottom:12 }}>{movements.length} movimenti · {movements.filter(m=>m.reconciled).length} riconciliati</span>
+      <span style={{ color:"#bbb",fontSize:11,fontWeight:600,display:"block",marginBottom:12 }}>{movements.length} movimientos · {movements.filter(m=>m.reconciled).length} conciliados</span>
       {movements.length===0 ? <div style={{ color:"#bbb",fontSize:13 }}>Sin movimientos.</div> :
         <div style={{ overflowX:"auto" }}>
           <table>
