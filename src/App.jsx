@@ -368,14 +368,21 @@ function parseRevolutText(text) {
   return results;
 }
 
-// ── DSP LOGO SVG ──────────────────────────────────────────────────────────────
+// ── LOGO ──────────────────────────────────────────────────────────────────────
 const IbersilosLogo = ({ height = 42 }) => (
-  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 78" style={{ height, width: "auto", display: "block" }}>
-    <text x="2" y="38" fontFamily="'Arial Black','Arial Bold',Arial,sans-serif" fontWeight="900" fontSize="40" fill="white" stroke="black" strokeWidth="4" strokeLinejoin="round" paintOrder="stroke fill" letterSpacing="-1">IBER</text>
-    <text x="2" y="74" fontFamily="'Arial Black','Arial Bold',Arial,sans-serif" fontWeight="900" fontSize="40" fill="white" stroke="black" strokeWidth="4" strokeLinejoin="round" paintOrder="stroke fill" letterSpacing="-1">SILOS</text>
-    <rect x="86" y="44" width="34" height="9" rx="4.5" fill="#E30613" transform="rotate(-28 86 44)" />
-    <rect x="88" y="30" width="30" height="8" rx="4" fill="#F5C800" transform="rotate(-28 88 30)" />
-    <rect x="90" y="17" width="26" height="8" rx="4" fill="#E30613" transform="rotate(-28 90 17)" />
+  <div style={{ padding:"4px 8px", background:"white", borderRadius:6, display:"inline-flex", alignItems:"center" }}>
+    <img src="/iber-silos-finance/logo.png" alt="Ibersilos" style={{ height, width:"auto", display:"block" }} />
+  </div>
+);
+
+// ── NAV ICONS (Feather-style SVG) ─────────────────────────────────────────────
+const Icon = ({ d, d2, rect, poly, circle, size=16 }) => (
+  <svg viewBox="0 0 24 24" width={size} height={size} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink:0 }}>
+    {d && <path d={d} />}
+    {d2 && <path d={d2} />}
+    {rect && <rect {...rect} />}
+    {poly && <polyline points={poly} />}
+    {circle && <circle {...circle} />}
   </svg>
 );
 
@@ -878,10 +885,10 @@ export default function IberSilosApp() {
   if (!authenticated) return <LoginScreen onLogin={() => setAuthenticated(true)} />;
 
   if (loading) return (
-    <div style={{ display:"flex",alignItems:"center",justifyContent:"center",height:"100vh",background:"#F5F5F5",fontFamily:"'Segoe UI',Roboto,Arial,sans-serif" }}>
+    <div style={{ display:"flex",alignItems:"center",justifyContent:"center",height:"100vh",background:"#F5F5F5",fontFamily:"'DM Sans','Segoe UI',sans-serif" }}>
       <div style={{ textAlign:"center" }}>
-        <IbersilosLogo height={60} />
-        <div style={{ marginTop:16,color:"#888",fontSize:13 }}>Cargando...</div>
+        <img src="/iber-silos-finance/logo.png" alt="Ibersilos" style={{ height:72, width:"auto", display:"block", margin:"0 auto" }} />
+        <div style={{ marginTop:16,color:"#bbb",fontSize:11,fontWeight:700,letterSpacing:"2px",textTransform:"uppercase" }}>Cargando...</div>
       </div>
     </div>
   );
@@ -889,74 +896,80 @@ export default function IberSilosApp() {
   const scaduteCount = data.invoices.filter(i => i.status === "aperta" && i.dueDate && i.dueDate < today()).length;
 
   const TABS = [
-    ["dashboard","📊","Dashboard"],
-    ["fatture","🧾","Facturas"],
-    ["movimenti","🏦","Movimientos"],
-    ["riconciliazione","🔗","Conciliación"],
-    ["forecast","📈","Forecast"],
-    ["ibkr","💹","IBKR SL"],
-    ["contabilidad","📒","Contabilidad"],
+    { id:"dashboard",    label:"Dashboard",    icon: <svg viewBox="0 0 24 24" width={16} height={16} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg> },
+    { id:"fatture",      label:"Facturas",     icon: <svg viewBox="0 0 24 24" width={16} height={16} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg> },
+    { id:"movimenti",    label:"Movimientos",  icon: <svg viewBox="0 0 24 24" width={16} height={16} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="1" y="4" width="22" height="16" rx="2"/><line x1="1" y1="10" x2="23" y2="10"/></svg> },
+    { id:"riconciliazione", label:"Conciliación", icon: <svg viewBox="0 0 24 24" width={16} height={16} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg> },
+    { id:"forecast",     label:"Forecast",     icon: <svg viewBox="0 0 24 24" width={16} height={16} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/></svg> },
+    { id:"ibkr",         label:"IBKR SL",      icon: <svg viewBox="0 0 24 24" width={16} height={16} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg> },
+    { id:"contabilidad", label:"Contabilidad", icon: <svg viewBox="0 0 24 24" width={16} height={16} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg> },
   ];
 
   return (
-    <div style={{ fontFamily:"'Segoe UI',Roboto,Helvetica,Arial,sans-serif", background:"#F5F5F5", minHeight:"100vh", color:"#1A1A1A", display:"flex", flexDirection:"column" }}>
+    <div style={{ fontFamily:"'DM Sans','Segoe UI',sans-serif", background:"#F5F5F5", minHeight:"100vh", color:"#1A1A1A", display:"flex", flexDirection:"column" }}>
       <style>{`
-        :root { --red: #E30613; --yellow: #F5C800; --dark: #1A1A1A; --bg: #F5F5F5; --border: #E0E0E0; --green: #28a745; --blue: #3949ab; --gold: #b8860b; --white: #ffffff; --text-muted: #999; --shadow: 0 2px 10px rgba(0,0,0,0.07); }
-        * { box-sizing: border-box; margin: 0; padding: 0; }
-        ::-webkit-scrollbar { width: 5px; } ::-webkit-scrollbar-track { background: var(--bg); } ::-webkit-scrollbar-thumb { background: #ddd; border-radius: 3px; }
-        input, select, textarea { font-family: 'Segoe UI',Roboto,Arial,sans-serif; background: white; border: 1.5px solid var(--border); color: var(--dark); padding: 8px 12px; border-radius: 8px; font-size: 13px; width: 100%; outline: none; transition: border-color 0.2s; }
-        input:focus, select:focus, textarea:focus { border-color: var(--red); box-shadow: 0 0 0 3px rgba(227,6,19,0.08); }
-        select option { background: white; }
-        button { font-family: 'Segoe UI',Roboto,Arial,sans-serif; cursor: pointer; border: none; border-radius: 8px; transition: all 0.15s; }
-        table { width: 100%; border-collapse: collapse; }
-        th { text-align: left; font-size: 10px; letter-spacing: 0.12em; text-transform: uppercase; color: #bbb; padding: 10px 12px; border-bottom: 2px solid var(--bg); background: #FAFAFA; }
-        td { padding: 10px 12px; font-size: 13px; border-bottom: 1px solid var(--bg); }
-        tr:hover td { background: #FFF5F5; }
-        .btn-red { background: var(--red); color: white; padding: 9px 20px; font-weight: 700; font-size: 13px; letter-spacing: 0.3px; box-shadow: 0 3px 10px rgba(227,6,19,0.25); }
-        .btn-red:hover { background: #B8050F; }
-        .btn-ghost { background: white; color: #666; padding: 8px 16px; border: 1.5px solid var(--border); font-size: 12px; font-weight: 600; }
-        .btn-ghost:hover { border-color: var(--red); color: var(--red); }
-        .btn-danger { background: transparent; color: var(--red); padding: 5px 10px; font-size: 11px; border: 1.5px solid rgba(227,6,19,0.3); }
-        .btn-danger:hover { background: rgba(227,6,19,0.05); }
-        .badge { display:inline-block; padding: 2px 8px; border-radius: 4px; font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; font-weight: 700; }
-        .badge-green { background: #e8f5e9; color: #2e7d32; border: 1px solid #a5d6a7; }
-        .badge-yellow { background: #fffde7; color: #b8860b; border: 1px solid #ffe082; }
-        .badge-red { background: #ffebee; color: var(--red); border: 1px solid #ef9a9a; }
-        .badge-blue { background: #e8eaf6; color: #3949ab; border: 1px solid #9fa8da; }
-        .badge-gray { background: var(--bg); color: #999; border: 1px solid var(--border); }
-        .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 100; display: flex; align-items: center; justify-content: center; padding: 20px; }
-        .modal { background: white; border-radius: 16px; border-top: 4px solid var(--red); padding: 28px; width: 100%; max-width: 580px; max-height: 90vh; overflow-y: auto; box-shadow: 0 20px 60px rgba(0,0,0,0.2); }
-        .modal-title { font-size: 15px; font-weight: 700; color: var(--red); letter-spacing: 0.3px; }
-        .form-row { display: grid; gap: 14px; margin-bottom: 14px; }
-        .form-row-2 { grid-template-columns: 1fr 1fr; }
-        label { display: block; font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; color: #999; margin-bottom: 5px; font-weight: 700; }
-        .kpi-card { background: white; border-radius: 12px; padding: 18px 20px; box-shadow: 0 2px 10px rgba(0,0,0,0.07); border-left: 4px solid var(--red); }
-        .kpi-card.yellow { border-left-color: var(--yellow); }
-        .kpi-card.green { border-left-color: #28a745; }
-        .kpi-card.blue { border-left-color: #3949ab; }
-        .kpi-card.gray { border-left-color: var(--border); }
-        .kpi-value { font-size: 24px; font-weight: 800; margin: 4px 0 2px; line-height: 1; }
-        .kpi-label { font-size: 10px; letter-spacing: 0.12em; text-transform: uppercase; color: #bbb; font-weight: 700; }
-        .section-title { font-size: 16px; font-weight: 800; display: flex; align-items: center; gap: 8px; text-transform: uppercase; letter-spacing: 1px; color: var(--dark); }
-        .section-title::before { content: ''; width: 4px; height: 20px; background: linear-gradient(to bottom, var(--red), var(--yellow)); border-radius: 2px; flex-shrink: 0; }
-        .card { background: white; border-radius: 12px; padding: 18px; box-shadow: 0 2px 10px rgba(0,0,0,0.07); }
-        .tab-btn { padding: 8px 16px; font-size: 12px; font-weight: 700; border-radius: 6px; background: transparent; color: #999; border: none; letter-spacing: 0.3px; transition: all 0.15s; }
-        .tab-btn:hover { color: var(--dark); background: var(--bg); }
-        .tab-btn.active { background: var(--red); color: white; }
-        .nav-item { display: flex; align-items: center; gap: 10px; padding: 10px 16px; cursor: pointer; border-left: 3px solid transparent; font-size: 13px; font-weight: 600; color: #666; transition: all 0.15s; border: none; background: transparent; width: 100%; text-align: left; }
-        .nav-item:hover { background: #FFF5F5; color: var(--dark); }
-        .nav-item.active { background: #FFF0F0; border-left: 3px solid var(--red); color: var(--red); font-weight: 700; }
-        .progress-bar { background: var(--bg); border-radius: 4px; height: 5px; overflow: hidden; }
-        .progress-fill { height: 100%; border-radius: 4px; background: linear-gradient(90deg, var(--red), var(--yellow)); }
+        :root { --red:#E30613; --yellow:#F5C800; --dark:#1A1A1A; --bg:#F5F5F5; --border:#E0E0E0; --green:#28a745; --blue:#3949ab; --gold:#b8860b; --white:#fff; --text-muted:#999; --shadow:0 2px 10px rgba(0,0,0,0.07); }
+        * { box-sizing:border-box; margin:0; padding:0; }
+        ::-webkit-scrollbar { width:4px; } ::-webkit-scrollbar-track { background:var(--bg); } ::-webkit-scrollbar-thumb { background:#ddd; border-radius:2px; }
+        body { font-family:'DM Sans','Segoe UI',sans-serif; }
+        input, select, textarea { font-family:'DM Sans','Segoe UI',sans-serif; background:white; border:1.5px solid var(--border); color:var(--dark); padding:8px 12px; border-radius:8px; font-size:13px; width:100%; outline:none; transition:border-color 0.2s; }
+        input:focus, select:focus, textarea:focus { border-color:var(--red); box-shadow:0 0 0 3px rgba(227,6,19,0.08); }
+        select option { background:white; }
+        button { font-family:'DM Sans','Segoe UI',sans-serif; cursor:pointer; border:none; border-radius:8px; transition:all 0.15s; }
+        table { width:100%; border-collapse:collapse; }
+        th { text-align:left; font-size:10px; letter-spacing:0.12em; text-transform:uppercase; color:#bbb; padding:10px 12px; border-bottom:2px solid var(--bg); background:#FAFAFA; font-family:'DM Sans','Segoe UI',sans-serif; font-weight:700; }
+        td { padding:10px 12px; font-size:13px; border-bottom:1px solid var(--bg); }
+        tr:hover td { background:#FFF5F5; }
+        .num { font-family:'IBM Plex Mono','Courier New',monospace; }
+        .btn-red { background:var(--red); color:white; padding:8px 18px; font-weight:700; font-size:12px; letter-spacing:0.3px; box-shadow:0 2px 8px rgba(227,6,19,0.22); }
+        .btn-red:hover { background:#B8050F; transform:translateY(-1px); box-shadow:0 4px 12px rgba(227,6,19,0.3); }
+        .btn-ghost { background:white; color:#555; padding:7px 14px; border:1.5px solid var(--border); font-size:12px; font-weight:600; }
+        .btn-ghost:hover { border-color:var(--red); color:var(--red); }
+        .btn-danger { background:transparent; color:var(--red); padding:5px 10px; font-size:11px; border:1.5px solid rgba(227,6,19,0.3); }
+        .btn-danger:hover { background:rgba(227,6,19,0.05); }
+        .badge { display:inline-block; padding:2px 8px; border-radius:4px; font-size:10px; letter-spacing:0.08em; text-transform:uppercase; font-weight:700; }
+        .badge-green { background:#e8f5e9; color:#2e7d32; border:1px solid #a5d6a7; }
+        .badge-yellow { background:#fffde7; color:#b8860b; border:1px solid #ffe082; }
+        .badge-red { background:#ffebee; color:var(--red); border:1px solid #ef9a9a; }
+        .badge-blue { background:#e8eaf6; color:#3949ab; border:1px solid #9fa8da; }
+        .badge-gray { background:var(--bg); color:#999; border:1px solid var(--border); }
+        .modal-overlay { position:fixed; inset:0; background:rgba(0,0,0,0.45); z-index:100; display:flex; align-items:center; justify-content:center; padding:20px; backdrop-filter:blur(2px); }
+        .modal { background:white; border-radius:14px; border-top:4px solid var(--red); padding:28px; width:100%; max-width:580px; max-height:90vh; overflow-y:auto; box-shadow:0 24px 64px rgba(0,0,0,0.18); }
+        .modal-title { font-size:14px; font-weight:700; color:var(--red); letter-spacing:0.4px; text-transform:uppercase; }
+        .form-row { display:grid; gap:14px; margin-bottom:14px; }
+        .form-row-2 { grid-template-columns:1fr 1fr; }
+        label { display:block; font-size:10px; letter-spacing:0.1em; text-transform:uppercase; color:#999; margin-bottom:5px; font-weight:700; }
+        .kpi-card { background:white; border-radius:10px; padding:16px 20px; box-shadow:0 1px 6px rgba(0,0,0,0.06); border-left:3px solid var(--red); }
+        .kpi-card.yellow { border-left-color:var(--yellow); }
+        .kpi-card.green { border-left-color:#28a745; }
+        .kpi-card.blue { border-left-color:#3949ab; }
+        .kpi-card.gray { border-left-color:var(--border); }
+        .kpi-value { font-size:22px; font-weight:700; margin:4px 0 2px; line-height:1; font-family:'IBM Plex Mono','Courier New',monospace; }
+        .kpi-label { font-size:10px; letter-spacing:0.12em; text-transform:uppercase; color:#bbb; font-weight:700; }
+        .section-title { font-size:13px; font-weight:800; display:flex; align-items:center; gap:8px; text-transform:uppercase; letter-spacing:1.5px; color:var(--dark); }
+        .section-title::before { content:''; width:3px; height:18px; background:linear-gradient(to bottom, var(--red), var(--yellow)); border-radius:2px; flex-shrink:0; }
+        .card { background:white; border-radius:10px; padding:18px; box-shadow:0 1px 6px rgba(0,0,0,0.06); }
+        .tab-btn { padding:7px 14px; font-size:12px; font-weight:700; border-radius:6px; background:transparent; color:#999; border:none; letter-spacing:0.3px; transition:all 0.15s; }
+        .tab-btn:hover { color:var(--dark); background:var(--bg); }
+        .tab-btn.active { background:var(--red); color:white; }
+        .nav-item { display:flex; align-items:center; gap:10px; padding:9px 16px; cursor:pointer; border-left:3px solid transparent; font-size:13px; font-weight:500; color:var(--text-muted); transition:all 0.15s; border:none; background:transparent; width:100%; text-align:left; }
+        .nav-item svg { width:16px; height:16px; stroke:currentColor; fill:none; stroke-width:2; stroke-linecap:round; stroke-linejoin:round; flex-shrink:0; }
+        .nav-item:hover { background:#fff5f5; color:var(--dark); }
+        .nav-item.active { background:#fff0f0; border-left:3px solid var(--red); color:var(--red); font-weight:700; }
+        .nav-badge { margin-left:auto; background:var(--red); color:white; font-size:9px; font-weight:700; padding:2px 6px; border-radius:10px; font-family:'IBM Plex Mono',monospace; }
+        .progress-bar { background:var(--bg); border-radius:4px; height:4px; overflow:hidden; }
+        .progress-fill { height:100%; border-radius:4px; background:linear-gradient(90deg, var(--red), var(--yellow)); }
+        .header-topbar { position:fixed; top:0; left:0; right:0; height:4px; background:var(--yellow); z-index:200; }
       `}</style>
 
-      <header style={{ background:"white", borderTop:"4px solid #F5C800", borderBottom:"4px solid #E30613", padding:"0 20px", height:60, display:"flex", alignItems:"center", gap:16, flexShrink:0, boxShadow:"0 2px 10px rgba(0,0,0,0.07)", zIndex:50 }}>
-        <IbersilosLogo height={40} />
-        <div style={{ width:1, height:28, background:"#E0E0E0" }} />
-        <div style={{ fontSize:10, fontWeight:700, letterSpacing:"2px", textTransform:"uppercase", color:"#bbb" }}>Gestión Financiera</div>
+      <div className="header-topbar" />
+      <header style={{ background:"white", borderBottom:"3px solid var(--red)", padding:"0 20px", height:60, marginTop:4, display:"flex", alignItems:"center", gap:16, flexShrink:0, boxShadow:"0 2px 8px rgba(0,0,0,0.07)", zIndex:50, position:"sticky", top:4 }}>
+        <IbersilosLogo height={44} />
+        <div style={{ width:1, height:28, background:"#E8E8E8" }} />
+        <div style={{ fontSize:10, fontWeight:700, letterSpacing:"2.5px", textTransform:"uppercase", color:"#bbb" }}>Gestión Financiera</div>
         <div style={{ flex:1 }} />
-        <div style={{ display:"flex", gap:14, alignItems:"center" }}>
-          <select value={ejercicio} onChange={e=>setEjercicio(e.target.value)} style={{ fontSize:11,padding:"5px 10px",border:"1.5px solid #E0E0E0",borderRadius:6,fontWeight:700,color:"#1A1A1A",background:"white",width:"auto" }}>
+        <div style={{ display:"flex", gap:12, alignItems:"center" }}>
+          <select value={ejercicio} onChange={e=>setEjercicio(e.target.value)} style={{ fontSize:11,padding:"5px 10px",border:"1.5px solid #E0E0E0",borderRadius:6,fontWeight:700,color:"#1A1A1A",background:"white",width:"auto",fontFamily:"'DM Sans',sans-serif" }}>
             {EJERCICIOS.map(e=><option key={e.id} value={e.id}>{e.label}</option>)}
           </select>
           <KpiPill label="Facturado" value={fmt(metrics.fatturato)} color="#E30613" />
@@ -965,9 +978,9 @@ export default function IberSilosApp() {
         </div>
         <div style={{ display:"flex", gap:6 }}>
           <button className="btn-ghost" onClick={() => setFattureAperteModal(true)} style={{ fontSize:11, position:"relative" }}>
-            📋 Abiertas
+            Abiertas
             {(data.invoices.filter(i=>i.status==="aperta"&&i.type==="emessa").length + data.invoices.filter(i=>i.status==="aperta"&&i.type==="ricevuta").length) > 0 && (
-              <span style={{ position:"absolute",top:-5,right:-5,background:"#E30613",color:"white",borderRadius:"50%",width:16,height:16,fontSize:9,fontWeight:800,display:"flex",alignItems:"center",justifyContent:"center" }}>
+              <span style={{ position:"absolute",top:-5,right:-5,background:"#E30613",color:"white",borderRadius:"50%",width:16,height:16,fontSize:9,fontWeight:800,display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"'IBM Plex Mono',monospace" }}>
                 {data.invoices.filter(i=>i.status==="aperta").length}
               </span>
             )}
@@ -979,17 +992,15 @@ export default function IberSilosApp() {
       </header>
 
       <div style={{ display:"flex", flex:1, overflow:"hidden" }}>
-        <aside style={{ width:200, background:"white", borderRight:"1px solid #E0E0E0", display:"flex", flexDirection:"column", flexShrink:0, overflowY:"auto" }}>
+        <aside style={{ width:204, background:"white", borderRight:"1px solid #EBEBEB", display:"flex", flexDirection:"column", flexShrink:0, overflowY:"auto" }}>
           <div style={{ padding:"10px 0", borderBottom:"1px solid #F5F5F5" }}>
-            <div style={{ fontSize:9, fontWeight:700, letterSpacing:"2px", textTransform:"uppercase", color:"#bbb", padding:"4px 16px 8px" }}>Navegación</div>
-            {TABS.map(([id, icon, label]) => (
+            <div style={{ fontSize:9, fontWeight:700, letterSpacing:"2px", textTransform:"uppercase", color:"#ccc", padding:"4px 16px 8px" }}>Navegación</div>
+            {TABS.map(({id, icon, label}) => (
               <button key={id} className={`nav-item ${tab===id?"active":""}`} onClick={() => setTab(id)}>
-                <span style={{ fontSize:15 }}>{icon}</span>
+                {icon}
                 <span style={{ flex:1 }}>{label}</span>
                 {id === "fatture" && scaduteCount > 0 && (
-                  <span style={{ background:"#E30613", color:"white", borderRadius:10, fontSize:9, fontWeight:800, padding:"1px 6px", minWidth:16, textAlign:"center" }}>
-                    {scaduteCount}
-                  </span>
+                  <span className="nav-badge">{scaduteCount}</span>
                 )}
               </button>
             ))}
