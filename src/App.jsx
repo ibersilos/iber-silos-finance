@@ -23,7 +23,7 @@ const SUPPLIERS = ["CCI Italia SRLS", "BMB Trasporti", "T-Way (renting)", "La Cl
   "IVA 0% (exento)": 0,
 };
 const IBKR_ETFS = ["VWCE", "VUAA", "SEC0", "C50", "Altro"];
-const IBKR_STOOQ = { VWCE:"vwce.de", VUAA:"vuaa.mi", SEC0:"sec0.de", C50:"c50.pa" };
+const IBKR_YAHOO = { VWCE:"VWCE.DE", VUAA:"VUAA.MI", SEC0:"SEC0.DE", C50:"C50.PA" };
 const STORAGE_KEY = "iber-silos-v2";
 
 // ── TAX & FINANCIAL CONSTANTS ─────────────────────────────────────────────────
@@ -1019,6 +1019,28 @@ export default function IberSilosApp() {
     persist({ ...data, ibkrPrices });
   }, [data, persist]);
 
+  const fetchIbkrPrices = useCallback(async () => {
+    try {
+      const results = await Promise.all(
+        Object.entries(IBKR_YAHOO).map(async ([ticker, symbol]) => {
+          const url = `https://finance.yahoo.com/quote/${symbol}`;
+          const proxy = `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`;
+          const res = await fetch(proxy, { signal: AbortSignal.timeout(12000) });
+          const html = await res.text();
+          const m = html.match(/"regularMarketPrice"\s*:\s*\{[^}]*"raw"\s*:\s*([\d.]+)/);
+          const price = m ? parseFloat(m[1]) : null;
+          return price ? [ticker, price] : null;
+        })
+      );
+      const map = Object.fromEntries(results.filter(Boolean));
+      if (Object.keys(map).length > 0) {
+        persist({ ...data, ibkrPrices: { ...(data.ibkrPrices||{}), ...map } });
+        return { ok: true, count: Object.keys(map).length };
+      }
+      return { ok: false };
+    } catch { return { ok: false }; }
+  }, [data, persist]);
+
   const saveIbkr = (pos) => {
     const shares = parseFloat(pos.shares) || 0, price = parseFloat(pos.priceEur) || 0, fees = parseFloat(pos.fees) || 0;
     const final = { ...pos, totalEur: parseFloat((shares * price + fees).toFixed(2)), id: pos.id || `ibkr-${Date.now()}` };
@@ -1457,7 +1479,7 @@ export default function IberSilosApp() {
             </div>
           )}
 
-          {tab==="ibkr" && <IbkrTab data={data} setIbkrModal={setIbkrModal} deleteIbkr={deleteIbkr} updateIbkrPrice={updateIbkrPrice} />}
+          {tab==="ibkr" && <IbkrTab data={data} setIbkrModal={setIbkrModal} deleteIbkr={deleteIbkr} updateIbkrPrice={updateIbkrPrice} fetchIbkrPrices={fetchIbkrPrices} />}
           {tab==="contabilidad" && <ContabilidadTab data={data} persist={persist} contabView={contabView} setContabView={setContabView} mayorCuenta={mayorCuenta} setMayorCuenta={setMayorCuenta} setAsientoModal={setAsientoModal} deleteAsiento={deleteAsiento} exportContabCSV={exportContabCSV} />}
           {tab==="iva_estera" && <IvaEsteraTab data={data} persist={persist} ejercicio={ejercicio} EJERCICIOS={EJERCICIOS} exportIvaEsteraCSV={exportIvaEsteraCSV} />}
         </div>
@@ -2182,7 +2204,16 @@ function IvaModal({ data, metrics, ejercicio, EJERCICIOS, exportIvaEsteraCSV, on
 }
 
 
-function IbkrTab({ data, setIbkrModal, deleteIbkr, updateIbkrPrice }) {
+function IbkrTab({ data, setIbkrModal, deleteIbkr, updateIbkrPrice, fetchIbkrPrices }) {
+  const [fetching, setFetching] = useState(false);
+  const [fetchMsg, setFetchMsg] = useState(null);
+  const handleFetch = async () => {
+    setFetching(true); setFetchMsg(null);
+    const r = await fetchIbkrPrices();
+    setFetchMsg(r.ok ? `✓ ${r.count} prezzi aggiornati` : "⚠ Nessun prezzo — inserisci manualmente");
+    setFetching(false);
+    setTimeout(() => setFetchMsg(null), 4000);
+  };
   const positions = data.ibkrPositions || [];
   const ibkrPrices = data.ibkrPrices || {};
   const byTicker = {};
@@ -2207,7 +2238,13 @@ function IbkrTab({ data, setIbkrModal, deleteIbkr, updateIbkrPrice }) {
     <div>
       <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20 }}>
         <div className="section-title">IBKR SL — Portfolio Iber-Silos SLU</div>
-        <button className="btn-red" onClick={()=>setIbkrModal({ id:null,ticker:"VWCE",date:today(),type:"acquisto",shares:"",priceEur:"",totalEur:"",fees:"0",notes:"" })}>+ Operazione</button>
+        <div style={{ display:"flex",gap:8,alignItems:"center" }}>
+          <button className="btn-ghost" onClick={handleFetch} disabled={fetching} style={{ fontSize:12 }}>
+            {fetching ? "⏳…" : "🔄 Aggiorna prezzi"}
+          </button>
+          {fetchMsg && <span style={{ fontSize:11, color: fetchMsg.startsWith("✓")?"#28a745":"#b8860b", fontWeight:600 }}>{fetchMsg}</span>}
+          <button className="btn-red" onClick={()=>setIbkrModal({ id:null,ticker:"VWCE",date:today(),type:"acquisto",shares:"",priceEur:"",totalEur:"",fees:"0",notes:"" })}>+ Operazione</button>
+        </div>
       </div>
       <div style={{ display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:14,marginBottom:20 }}>
         <div className="kpi-card"><div className="kpi-label">Totale investito</div><div className="kpi-value" style={{ color:"#E30613" }}>{fmt(totalInvested)}</div></div>
