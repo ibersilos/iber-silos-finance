@@ -23,6 +23,7 @@ const SUPPLIERS = ["CCI Italia SRLS", "BMB Trasporti", "T-Way (renting)", "La Cl
   "IVA 0% (exento)": 0,
 };
 const IBKR_ETFS = ["VWCE", "VUAA", "SEC0", "C50", "Altro"];
+const IBKR_YAHOO = { VWCE:"VWCE.DE", VUAA:"VUAA.MI", SEC0:"SEC0.DE", C50:"C50.PA" };
 const STORAGE_KEY = "iber-silos-v2";
 
 // ── TAX & FINANCIAL CONSTANTS ─────────────────────────────────────────────────
@@ -952,6 +953,8 @@ export default function IberSilosApp() {
   const [movModal, setMovModal] = useState(null);
   const [reconcileModal, setReconcileModal] = useState(null);
   const [ibkrModal, setIbkrModal] = useState(null);
+  const [ibkrPrices, setIbkrPrices] = useState({});
+  const [ibkrPricesTs, setIbkrPricesTs] = useState(null);
   const [asientoModal, setAsientoModal] = useState(null);
   const [contabView, setContabView] = useState("diario");
   const [mayorCuenta, setMayorCuenta] = useState("572");
@@ -1012,6 +1015,26 @@ export default function IberSilosApp() {
     persist({ ...data, movements }); setMovModal(null); showToast(exists ? "Actualizado" : "Añadido");
   };
   const deleteMov = (id) => setConfirmModal({ message:"Se eliminará el movimiento.", onConfirm: () => { persist({ ...data, movements: data.movements.filter(m => m.id !== id) }); showToast("Movimiento eliminado", "warn"); setConfirmModal(null); } });
+
+  const fetchIbkrPrices = useCallback(async () => {
+    const symbols = Object.values(IBKR_YAHOO).join(",");
+    try {
+      const url = `https://query1.finance.yahoo.com/v7/finance/quote?symbols=${symbols}&fields=regularMarketPrice`;
+      const proxy = `https://corsproxy.io/?url=${encodeURIComponent(url)}`;
+      const res = await fetch(proxy);
+      if (!res.ok) throw new Error("fetch error");
+      const json = await res.json();
+      const quotes = json?.quoteResponse?.result || [];
+      const map = {};
+      quotes.forEach(q => {
+        const ticker = Object.entries(IBKR_YAHOO).find(([,v]) => v === q.symbol)?.[0];
+        if (ticker && q.regularMarketPrice) map[ticker] = q.regularMarketPrice;
+      });
+      if (Object.keys(map).length > 0) { setIbkrPrices(map); setIbkrPricesTs(new Date()); }
+    } catch { /* silently fail — user sees stale/no prices */ }
+  }, []);
+
+  useEffect(() => { if (tab === "ibkr") fetchIbkrPrices(); }, [tab, fetchIbkrPrices]);
 
   const saveIbkr = (pos) => {
     const shares = parseFloat(pos.shares) || 0, price = parseFloat(pos.priceEur) || 0, fees = parseFloat(pos.fees) || 0;
@@ -1454,7 +1477,7 @@ export default function IberSilosApp() {
             </div>
           )}
 
-          {tab==="ibkr" && <IbkrTab data={data} setIbkrModal={setIbkrModal} deleteIbkr={deleteIbkr} />}
+          {tab==="ibkr" && <IbkrTab data={data} setIbkrModal={setIbkrModal} deleteIbkr={deleteIbkr} ibkrPrices={ibkrPrices} ibkrPricesTs={ibkrPricesTs} fetchIbkrPrices={fetchIbkrPrices} />}
           {tab==="contabilidad" && <ContabilidadTab data={data} persist={persist} contabView={contabView} setContabView={setContabView} mayorCuenta={mayorCuenta} setMayorCuenta={setMayorCuenta} setAsientoModal={setAsientoModal} deleteAsiento={deleteAsiento} exportContabCSV={exportContabCSV} />}
           {tab==="iva_estera" && <IvaEsteraTab data={data} persist={persist} ejercicio={ejercicio} EJERCICIOS={EJERCICIOS} exportIvaEsteraCSV={exportIvaEsteraCSV} />}
         </div>
@@ -2296,7 +2319,8 @@ function AeatModal({ data, ejercicio, EJERCICIOS, onClose }) {
 }
 
 
-function IbkrTab({ data, setIbkrModal, deleteIbkr }) {
+function IbkrTab({ data, setIbkrModal, deleteIbkr, ibkrPrices, ibkrPricesTs, fetchIbkrPrices }) {
+  const [refreshing, setRefreshing] = useState(false);
   const positions = data.ibkrPositions || [];
   const byTicker = {};
   positions.forEach(p => {
@@ -2307,35 +2331,74 @@ function IbkrTab({ data, setIbkrModal, deleteIbkr }) {
   });
   const tickers = Object.values(byTicker).filter(t=>t.shares>0.0001);
   const totalInvested = tickers.reduce((s,t)=>s+t.totalInvested,0);
+  const hasPrices = Object.keys(ibkrPrices||{}).length > 0;
+  const totalCurrentValue = hasPrices ? tickers.reduce((s,t)=>s+t.shares*(ibkrPrices[t.ticker]||0),0) : 0;
+  const totalPL = hasPrices ? totalCurrentValue - totalInvested : null;
+  const totalPLperc = totalInvested>0 && totalPL!==null ? (totalPL/totalInvested*100) : null;
+
   const pacByMonth = {};
   positions.filter(p=>p.type==="acquisto").forEach(p => { const m=p.date.slice(0,7); if(!pacByMonth[m]) pacByMonth[m]=0; pacByMonth[m]+=parseFloat(p.totalEur)||0; });
   const pacChart = Object.entries(pacByMonth).sort().map(([m,v])=>({ month:m.slice(5)+"/"+m.slice(2,4), investito:parseFloat(v.toFixed(2)), target:getPacAmount(m+"-15") }));
 
+  const handleRefresh = async () => { setRefreshing(true); await fetchIbkrPrices(); setRefreshing(false); };
+
   return (
     <div>
       <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20 }}>
-        <div className="section-title">IBKR SL — Portfolio Iber-Silos SLU</div>
-        <button className="btn-red" onClick={()=>setIbkrModal({ id:null,ticker:"VWCE",date:today(),type:"acquisto",shares:"",priceEur:"",totalEur:"",fees:"0",notes:"" })}>+ Operazione</button>
+        <div>
+          <div className="section-title">IBKR SL — Portfolio Iber-Silos SLU</div>
+          {ibkrPricesTs && <div style={{ fontSize:10,color:"#bbb",marginTop:2 }}>Prezzi aggiornati: {ibkrPricesTs.toLocaleTimeString("it-IT")}</div>}
+        </div>
+        <div style={{ display:"flex",gap:8 }}>
+          <button className="btn-ghost" onClick={handleRefresh} disabled={refreshing} style={{ fontSize:12 }}>{refreshing ? "⏳" : "🔄"} Aggiorna prezzi</button>
+          <button className="btn-red" onClick={()=>setIbkrModal({ id:null,ticker:"VWCE",date:today(),type:"acquisto",shares:"",priceEur:"",totalEur:"",fees:"0",notes:"" })}>+ Operazione</button>
+        </div>
       </div>
       <div style={{ display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:14,marginBottom:20 }}>
         <div className="kpi-card"><div className="kpi-label">Totale investito</div><div className="kpi-value" style={{ color:"#E30613" }}>{fmt(totalInvested)}</div></div>
-        <div className="kpi-card gray"><div className="kpi-label">Ticker</div><div className="kpi-value">{tickers.length}</div></div>
-        <div className="kpi-card gray"><div className="kpi-label">Operazioni</div><div className="kpi-value">{positions.length}</div></div>
+        <div className="kpi-card blue"><div className="kpi-label">Valore corrente</div><div className="kpi-value" style={{ color:"#3949ab" }}>{hasPrices ? fmt(totalCurrentValue) : "—"}</div></div>
+        <div className="kpi-card" style={{ background: totalPL===null?"#FAFAFA":totalPL>=0?"#f0fff4":"#fff5f5" }}>
+          <div className="kpi-label">P/L non realizzato</div>
+          <div className="kpi-value" style={{ color: totalPL===null?"#bbb":totalPL>=0?"#28a745":"#E30613" }}>
+            {totalPL===null ? "—" : `${totalPL>=0?"+":""}${fmt(totalPL)}`}
+          </div>
+          {totalPLperc!==null && <div style={{ fontSize:11,color:totalPL>=0?"#28a745":"#E30613",marginTop:2 }}>{totalPL>=0?"+":""}{totalPLperc.toFixed(2)}%</div>}
+        </div>
         <div className="kpi-card yellow"><div className="kpi-label">PAC target/mese</div><div className="kpi-value" style={{ color:"#b8860b" }}>{fmt(getPacAmount(today()))}</div><div style={{ fontSize:10,color:"#bbb",marginTop:2 }}>→ €500 desde jul 2026</div></div>
       </div>
       <div className="card" style={{ marginBottom:16 }}>
         <div style={{ fontSize:10,fontWeight:700,letterSpacing:"1.5px",textTransform:"uppercase",color:"#bbb",marginBottom:12 }}>Posiciones abiertas</div>
         {tickers.length===0 ? <div style={{ color:"#bbb",fontSize:13 }}>Sin posiciones.</div> :
-          <table><thead><tr><th>Ticker</th><th style={{ textAlign:"right" }}>Shares</th><th style={{ textAlign:"right" }}>PMC</th><th style={{ textAlign:"right" }}>Valore PMC</th><th style={{ textAlign:"right" }}>% portafoglio</th></tr></thead>
+          <table><thead><tr>
+            <th>Ticker</th>
+            <th style={{ textAlign:"right" }}>Shares</th>
+            <th style={{ textAlign:"right" }}>PMC</th>
+            <th style={{ textAlign:"right" }}>Prezzo att.</th>
+            <th style={{ textAlign:"right" }}>Valore att.</th>
+            <th style={{ textAlign:"right" }}>P/L €</th>
+            <th style={{ textAlign:"right" }}>P/L %</th>
+            <th style={{ textAlign:"right" }}>% portafoglio</th>
+          </tr></thead>
           <tbody>{tickers.map(t => {
             const pmc = t.shares>0 ? t.totalInvested/t.shares : 0;
             const perc = totalInvested>0 ? t.totalInvested/totalInvested*100 : 0;
+            const currentPrice = ibkrPrices?.[t.ticker];
+            const currentValue = currentPrice ? t.shares * currentPrice : null;
+            const pl = currentValue !== null ? currentValue - t.totalInvested : null;
+            const plPerc = pl !== null && t.totalInvested > 0 ? pl/t.totalInvested*100 : null;
             return (
               <tr key={t.ticker}>
                 <td style={{ fontWeight:800,color:"#E30613",fontSize:15 }}>{t.ticker}</td>
                 <td style={{ textAlign:"right" }}>{t.shares.toFixed(4)}</td>
-                <td style={{ textAlign:"right" }}>{fmt(pmc)}</td>
-                <td style={{ textAlign:"right",fontWeight:600 }}>{fmt(t.shares*pmc)}</td>
+                <td style={{ textAlign:"right",color:"#999" }}>{fmt(pmc)}</td>
+                <td style={{ textAlign:"right",fontFamily:"'IBM Plex Mono',monospace",fontWeight:600 }}>{currentPrice ? fmt(currentPrice) : <span style={{ color:"#bbb" }}>—</span>}</td>
+                <td style={{ textAlign:"right",fontWeight:600 }}>{currentValue !== null ? fmt(currentValue) : <span style={{ color:"#bbb" }}>—</span>}</td>
+                <td style={{ textAlign:"right",fontFamily:"'IBM Plex Mono',monospace",fontWeight:700,color: pl===null?"#bbb":pl>=0?"#28a745":"#E30613" }}>
+                  {pl===null ? "—" : `${pl>=0?"+":""}${fmt(pl)}`}
+                </td>
+                <td style={{ textAlign:"right",fontSize:12,color: plPerc===null?"#bbb":plPerc>=0?"#28a745":"#E30613" }}>
+                  {plPerc===null ? "—" : `${plPerc>=0?"+":""}${plPerc.toFixed(2)}%`}
+                </td>
                 <td style={{ textAlign:"right" }}>
                   <div style={{ display:"flex",alignItems:"center",justifyContent:"flex-end",gap:8 }}>
                     <div style={{ width:60,height:4,background:"#F5F5F5",borderRadius:2 }}><div style={{ width:`${Math.min(perc,100)}%`,height:"100%",background:"#E30613",borderRadius:2 }}/></div>
