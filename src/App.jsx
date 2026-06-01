@@ -23,7 +23,7 @@ const SUPPLIERS = ["CCI Italia SRLS", "BMB Trasporti", "T-Way (renting)", "La Cl
   "IVA 0% (exento)": 0,
 };
 const IBKR_ETFS = ["VWCE", "VUAA", "SEC0", "C50", "Altro"];
-const IBKR_YAHOO = { VWCE:"VWCE.DE", VUAA:"VUAA.MI", SEC0:"SEC0.DE", C50:"C50.PA" };
+const IBKR_STOOQ = { VWCE:"vwce.de", VUAA:"vuaa.mi", SEC0:"sec0.de", C50:"c50.pa" };
 const STORAGE_KEY = "iber-silos-v2";
 
 // ── TAX & FINANCIAL CONSTANTS ─────────────────────────────────────────────────
@@ -149,13 +149,14 @@ async function loadData() {
       if (!d.asientos)          d.asientos          = [];
       if (!d.fixedAssets)       d.fixedAssets       = DEFAULT_ASSETS;
       if (!d.ibkrPositions)     d.ibkrPositions     = [];
+      if (!d.ibkrPrices)        d.ibkrPrices        = {};
       if (!d.ivaEsteraStatus)   d.ivaEsteraStatus   = {};
       // Migration: aggiunge campi IVA estera a tutte le fatture ricevute esistenti
       if (d.invoices) d.invoices = d.invoices.map(migrateInvoice);
       return d;
     }
   } catch {}
-  return { invoices: [], movements: [], ibkrPositions: [], asientos: [], fixedAssets: DEFAULT_ASSETS, ivaEsteraStatus: {} };
+  return { invoices: [], movements: [], ibkrPositions: [], ibkrPrices: {}, asientos: [], fixedAssets: DEFAULT_ASSETS, ivaEsteraStatus: {} };
 }
 function saveData(data, onError) {
   try { localStorage.setItem(STORAGE_KEY, JSON.stringify(data)); }
@@ -945,7 +946,7 @@ export default function IberSilosApp() {
     return !!token && Object.values(USERS).includes(token);
   });
   const [tab, setTab] = useState("dashboard");
-  const [data, setData] = useState({ invoices: [], movements: [], ibkrPositions: [], asientos: [], fixedAssets: DEFAULT_ASSETS, ivaEsteraStatus: {} });
+  const [data, setData] = useState({ invoices: [], movements: [], ibkrPositions: [], ibkrPrices: {}, asientos: [], fixedAssets: DEFAULT_ASSETS, ivaEsteraStatus: {} });
   const [loading, setLoading] = useState(true);
   const [toast, setToast] = useState(null);
   const [confirmModal, setConfirmModal] = useState(null); // { message, onConfirm }
@@ -956,6 +957,8 @@ export default function IberSilosApp() {
   const [ibkrPrices, setIbkrPrices] = useState({});
   const [ibkrPricesTs, setIbkrPricesTs] = useState(null);
   const [ibkrPricesErr, setIbkrPricesErr] = useState(null);
+  // Carica prezzi salvati quando i dati sono pronti
+  useEffect(() => { if (!loading && data.ibkrPrices && Object.keys(data.ibkrPrices).length > 0) setIbkrPrices(data.ibkrPrices); }, [loading]);
   const [asientoModal, setAsientoModal] = useState(null);
   const [contabView, setContabView] = useState("diario");
   const [mayorCuenta, setMayorCuenta] = useState("572");
@@ -1020,27 +1023,34 @@ export default function IberSilosApp() {
     setIbkrPricesErr(null);
     try {
       const results = await Promise.all(
-        Object.entries(IBKR_YAHOO).map(async ([ticker, symbol]) => {
-          const url = `https://query1.finance.yahoo.com/v8/finance/chart/${symbol}?interval=1d&range=1d`;
+        Object.entries(IBKR_STOOQ).map(async ([ticker, symbol]) => {
+          // Stooq restituisce CSV: Date,Open,High,Low,Close,Volume (righe più recenti in cima)
+          const url = `https://stooq.com/q/d/l/?s=${symbol}&i=d`;
           const proxy = `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`;
-          const res = await fetch(proxy, { signal: AbortSignal.timeout(8000) });
+          const res = await fetch(proxy, { signal: AbortSignal.timeout(10000) });
           if (!res.ok) return null;
-          const json = await res.json();
-          const price = json?.chart?.result?.[0]?.meta?.regularMarketPrice;
-          return price ? [ticker, parseFloat(price.toFixed(4))] : null;
+          const text = await res.text();
+          // Prima riga = header, seconda = dato più recente
+          const lines = text.trim().split("\n");
+          if (lines.length < 2) return null;
+          const cols = lines[1].split(","); // Date,Open,High,Low,Close,Volume
+          const close = parseFloat(cols[4]);
+          return (!isNaN(close) && close > 0) ? [ticker, close] : null;
         })
       );
       const map = Object.fromEntries(results.filter(Boolean));
       if (Object.keys(map).length > 0) {
         setIbkrPrices(map);
         setIbkrPricesTs(new Date());
+        // Persiste i prezzi in localStorage insieme agli altri dati
+        persist({ ...data, ibkrPrices: { ...(data.ibkrPrices||{}), ...map } });
       } else {
-        setIbkrPricesErr("Nessun prezzo ricevuto. Mercato chiuso o servizio non disponibile.");
+        setIbkrPricesErr("Nessun prezzo ricevuto — mercato chiuso o simbolo non trovato.");
       }
     } catch (e) {
       setIbkrPricesErr("Errore connessione: " + (e.message || "timeout"));
     }
-  }, []);
+  }, [data, persist]);
 
   useEffect(() => { if (tab === "ibkr") fetchIbkrPrices(); }, [tab, fetchIbkrPrices]);
 
@@ -1393,9 +1403,6 @@ export default function IberSilosApp() {
                       Último: {fmtDate(lastOp.date)} · {fmt(lastOp.totalEur)}
                     </div>
                   )}
-                  <button className="btn-ghost" style={{ fontSize:10, padding:"5px 8px", width:"100%", marginTop:8 }} onClick={() => setTab("ibkr")}>
-                    Ver IBKR →
-                  </button>
                 </>
               );
             })()}
