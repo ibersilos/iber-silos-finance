@@ -5,6 +5,9 @@ on:
     - cron: '30 17 * * 1-5'   # 18:30 CET lun-ven (dopo chiusura mercati EU)
   workflow_dispatch:            # trigger manuale da GitHub UI
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 jobs:
   fetch:
     runs-on: ubuntu-latest
