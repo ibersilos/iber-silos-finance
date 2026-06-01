@@ -588,14 +588,8 @@ function LoginScreen({ onLogin }) {
       <div style={{ position:'fixed', top:4, left:0, right:0, height:4, background:'#E30613' }} />
       <div style={{ width:360, maxWidth:'96vw', background:'white', borderRadius:12, boxShadow:'0 4px 32px rgba(0,0,0,0.10)', border:'1px solid #ebebeb', overflow:'hidden' }}>
         <div style={{ background:'white', padding:'36px 32px 24px', textAlign:'center', borderBottom:'1px solid #f0f0f0' }}>
-          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 140 90" style={{ height:80, width:'auto', display:'block', margin:'0 auto 12px' }}>
-            <text x="2" y="44" fontFamily="'Arial Black','Arial Bold',Arial,sans-serif" fontWeight="900" fontSize="46" fill="white" stroke="black" strokeWidth="5" strokeLinejoin="round" paintOrder="stroke fill" letterSpacing="-1">IBER</text>
-            <text x="2" y="86" fontFamily="'Arial Black','Arial Bold',Arial,sans-serif" fontWeight="900" fontSize="46" fill="white" stroke="black" strokeWidth="5" strokeLinejoin="round" paintOrder="stroke fill" letterSpacing="-1">SILOS</text>
-            <rect x="98" y="50" width="40" height="11" rx="5.5" fill="#E30613" transform="rotate(-28 98 50)" />
-            <rect x="101" y="33" width="35" height="10" rx="5" fill="#F5C800" transform="rotate(-28 101 33)" />
-            <rect x="104" y="18" width="30" height="9" rx="4.5" fill="#E30613" transform="rotate(-28 104 18)" />
-          </svg>
-          <p style={{ color:'#aaa', fontSize:11, margin:0, letterSpacing:'0.8px', textTransform:'uppercase' }}>Gestión Financiera · Reus, Tarragona</p>
+          <img src="/iber-silos-finance/logo.png" alt="Ibersilos" style={{ height:80, width:'auto', display:'block', margin:'0 auto 12px' }} />
+          <p style={{ color:'#aaa', fontSize:11, margin:0, letterSpacing:'0.8px', textTransform:'uppercase', fontFamily:"'DM Sans','Segoe UI',sans-serif" }}>Gestión Financiera · Reus, Tarragona</p>
         </div>
         <div style={{ padding:'28px 32px' }}>
           <div style={{ marginBottom:16 }}>
