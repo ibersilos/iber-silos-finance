@@ -959,8 +959,7 @@ export default function IberSilosApp() {
   const [contabView, setContabView] = useState("diario");
   const [mayorCuenta, setMayorCuenta] = useState("572");
   const [ejercicio, setEjercicio] = useState("EF2");
-  const [bimModal, setBimModal] = useState(false);
-  const [aeatModal, setAeatModal] = useState(false);
+  const [ivaModal, setIvaModal] = useState(false);
   const [fattureAperteModal, setFattureAperteModal] = useState(false);
   const [importConfirmModal, setImportConfirmModal] = useState(null);
   const fileRef = useRef();
@@ -1395,7 +1394,7 @@ export default function IberSilosApp() {
         </aside>
 
         <div style={{ flex:1, overflow:"auto", padding:24, scrollBehavior:"smooth" }}>
-          {tab==="dashboard" && <DashboardTab data={data} metrics={metrics} forecast={forecast} ejercicio={ejercicio} EJERCICIOS={EJERCICIOS} bimModal={bimModal} setBimModal={setBimModal} aeatModal={aeatModal} setAeatModal={setAeatModal} exportIvaEsteraCSV={exportIvaEsteraCSV} />}
+          {tab==="dashboard" && <DashboardTab data={data} metrics={metrics} forecast={forecast} ejercicio={ejercicio} EJERCICIOS={EJERCICIOS} setIvaModal={setIvaModal} exportIvaEsteraCSV={exportIvaEsteraCSV} />}
 
           {tab==="fatture" && (
             <div>
@@ -1531,45 +1530,7 @@ export default function IberSilosApp() {
       {asientoModal && <AsientoModal asiento={asientoModal} onSave={saveAsiento} onClose={()=>setAsientoModal(null)} />}
 
       {confirmModal && <ConfirmModal message={confirmModal.message} onConfirm={confirmModal.onConfirm} onCancel={()=>setConfirmModal(null)} />}
-      {aeatModal && <AeatModal data={data} ejercicio={ejercicio} EJERCICIOS={EJERCICIOS} onClose={()=>setAeatModal(false)} />}
-      {bimModal && (
-        <div className="modal-overlay" onClick={()=>setBimModal(false)}>
-          <div className="modal" style={{ maxWidth:580 }} onClick={e=>e.stopPropagation()}>
-            <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20 }}>
-              <div className="modal-title">Recupero IVA Estera — Pratica Diretta</div>
-              <button onClick={()=>setBimModal(false)} style={{ background:"none",fontSize:20,color:"#999" }}>×</button>
-            </div>
-            <div style={{ background:"#fffde7",border:"1.5px solid #ffe082",borderRadius:8,padding:"10px 14px",marginBottom:18,fontSize:12,color:"#b8860b" }}>
-              Procedura annuale (Direttiva 2008/9/CE) · Scadenza: <strong>30/09 anno successivo</strong> · Soglia: <strong>€{IVA_ESTERA_SOGLIA_ANNUA} annuo</strong> (richiesta annuale) · <strong>€{IVA_ESTERA_SOGLIA_TRIM} trimestrale</strong>
-            </div>
-            {[
-              { paese:"🇮🇹 Italia", codice:"IT", aliquota:IVA_RATES.IT, note:"Pedaggi autostradali Italia via gestore prepagato (Euro Service GmbH). Targa GR516KN.", procedura:"Portale VIES + modulo elettronico Agenzia Entrate italiana. Documenti: fatture IT + estratto conto + delega.", normativa:"Dir. 2008/9/CE — rimborso IVA UE" },
-              { paese:"🇫🇷 Francia", codice:"FR", aliquota:IVA_RATES.FR, note:"Pedaggi DKV incluso Tunnel Frejus. Verificare se emessa fattura separata per Francia.", procedura:"Portale VIES + direction.impots.gouv.fr. Documenti: fatture Francia + estratto conto.", normativa:"Dir. 2008/9/CE — rimborso IVA UE" },
-            ].map(p=>(
-              <div key={p.codice} style={{ border:"1.5px solid #E0E0E0",borderRadius:10,padding:"16px",marginBottom:14 }}>
-                <div style={{ display:"flex",justifyContent:"space-between",marginBottom:10 }}>
-                  <div style={{ fontWeight:800,fontSize:15 }}>{p.paese}</div>
-                  <div style={{ fontSize:10,color:"#999" }}>{p.normativa}</div>
-                </div>
-                <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:12 }}>
-                  <div style={{ background:"#FAFAFA",borderRadius:6,padding:"8px 10px" }}>
-                    <div style={{ fontSize:10,color:"#bbb",fontWeight:700 }}>ALIQUOTA IVA</div>
-                    <div style={{ fontWeight:800,fontSize:18,color:"#1A1A1A" }}>{(p.aliquota*100).toFixed(0)}%</div>
-                  </div>
-                  <div style={{ background:"#FAFAFA",borderRadius:6,padding:"8px 10px" }}>
-                    <div style={{ fontSize:10,color:"#bbb",fontWeight:700 }}>SOGLIA MIN.</div>
-                    <div style={{ fontWeight:800,fontSize:18,color:"#28a745" }}>€{IVA_ESTERA_SOGLIA_TRIM}</div>
-                    <div style={{ fontSize:10,color:"#bbb" }}>IVA/trimestre</div>
-                  </div>
-                </div>
-                <div style={{ fontSize:11,color:"#666",marginBottom:8,lineHeight:1.5 }}><strong>Note:</strong> {p.note}</div>
-                <div style={{ fontSize:11,color:"#3949ab",background:"#f0f4ff",borderRadius:6,padding:"8px 10px",lineHeight:1.5 }}><strong>Procedura:</strong> {p.procedura}</div>
-              </div>
-            ))}
-            <button className="btn-ghost" style={{ width:"100%",marginTop:4 }} onClick={()=>setBimModal(false)}>Cerrar</button>
-          </div>
-        </div>
-      )}
+      {ivaModal && <IvaModal data={data} metrics={metrics} ejercicio={ejercicio} EJERCICIOS={EJERCICIOS} exportIvaEsteraCSV={exportIvaEsteraCSV} onClose={()=>setIvaModal(false)} />}
 
       {importConfirmModal && (
         <div className="modal-overlay" onClick={()=>setImportConfirmModal(null)}>
@@ -1614,8 +1575,7 @@ export default function IberSilosApp() {
 
 
 // ── DASHBOARD TAB ────────────────────────────────────────────────────────────
-// ── CARD IVA AEAT (Modelo 303 / REDEME) ─────────────────────────────────────
-// ── IVA ESTERA EXPORT BUTTON ─────────────────────────────────────────────────
+// ── IVA ESTERA EXPORT BUTTON (riutilizzato nel modal) ────────────────────────
 function IvaEsteraExportBtn({ exportIvaEsteraCSV, ejercicio }) {
   const [open, setOpen] = useState(false);
   const ej   = EJERCICIOS.find(e=>e.id===ejercicio)||EJERCICIOS[1];
@@ -1628,224 +1588,71 @@ function IvaEsteraExportBtn({ exportIvaEsteraCSV, ejercicio }) {
   ];
   return (
     <div style={{ position:"relative" }}>
-      <button
-        className="btn-ghost"
-        style={{ fontSize:11, background:"#fffde7", borderColor:"#ffe082", color:"#b8860b", fontWeight:700 }}
-        onClick={() => setOpen(o => !o)}
-      >
+      <button className="btn-ghost" style={{ fontSize:11,background:"#fffde7",borderColor:"#ffe082",color:"#b8860b",fontWeight:700 }} onClick={()=>setOpen(o=>!o)}>
         ↓ Export CSV Hacienda
       </button>
       {open && (
-        <div style={{
-          position:"absolute", top:"100%", right:0, marginTop:4,
-          background:"white", border:"1.5px solid #ffe082", borderRadius:8,
-          boxShadow:"0 4px 20px rgba(0,0,0,0.12)", zIndex:50, minWidth:210, overflow:"hidden"
-        }}>
-          <div style={{ fontSize:9,fontWeight:700,letterSpacing:"1.5px",textTransform:"uppercase",color:"#bbb",padding:"8px 14px 4px" }}>
-            Seleziona trimestre
-          </div>
-          {trimestri.map(t => (
-            <button key={t.id}
-              onClick={() => { exportIvaEsteraCSV(t.id); setOpen(false); }}
-              style={{ display:"block",width:"100%",textAlign:"left",padding:"10px 14px",
-                background:"white",border:"none",borderBottom:"1px solid #F5F5F5",
-                cursor:"pointer",fontSize:12,fontWeight:600,color:"#1A1A1A" }}
-              onMouseEnter={e=>e.currentTarget.style.background="#fffde7"}
-              onMouseLeave={e=>e.currentTarget.style.background="white"}
-            >
-              <span style={{ fontWeight:800,color:"#b8860b",marginRight:8 }}>{t.id}</span>
-              {t.label}
+        <div style={{ position:"absolute",top:"100%",right:0,marginTop:4,background:"white",border:"1.5px solid #ffe082",borderRadius:8,boxShadow:"0 4px 20px rgba(0,0,0,0.12)",zIndex:50,minWidth:210,overflow:"hidden" }}>
+          <div style={{ fontSize:9,fontWeight:700,letterSpacing:"1.5px",textTransform:"uppercase",color:"#bbb",padding:"8px 14px 4px" }}>Seleziona trimestre</div>
+          {trimestri.map(t=>(
+            <button key={t.id} onClick={()=>{exportIvaEsteraCSV(t.id);setOpen(false);}}
+              style={{ display:"block",width:"100%",textAlign:"left",padding:"10px 14px",background:"white",border:"none",borderBottom:"1px solid #F5F5F5",cursor:"pointer",fontSize:12,fontWeight:600,color:"#1A1A1A" }}
+              onMouseEnter={e=>e.currentTarget.style.background="#fffde7"} onMouseLeave={e=>e.currentTarget.style.background="white"}>
+              <span style={{ fontWeight:800,color:"#b8860b",marginRight:8 }}>{t.id}</span>{t.label}
               <span style={{ float:"right",fontSize:10,color:"#bbb",fontWeight:400 }}>scad. {t.scad}</span>
             </button>
           ))}
-          <div style={{ padding:"8px 14px",fontSize:10,color:"#bbb",borderTop:"1px solid #F5F5F5" }}>
-            CSV ; · per La Clau Assessors
-          </div>
+          <div style={{ padding:"8px 14px",fontSize:10,color:"#bbb",borderTop:"1px solid #F5F5F5" }}>CSV ; · per La Clau Assessors</div>
         </div>
       )}
     </div>
   );
 }
 
-function IvaAeatCard({ metrics, onDetail }) {
+// ── CARD IVA RIEPILOGO (solo totali — dashboard) ──────────────────────────────
+function IvaResumenCard({ metrics, data, ejercicio, EJERCICIOS, onDetail }) {
   const { ivaSop, ivaRep, ivaCredito, ivaDevol } = metrics;
   const isCredito = ivaCredito >= 0;
-  const perc = ivaSop > 0 ? Math.min((ivaRep / ivaSop) * 100, 100) : 0;
+
+  // Calcola totale IVA estera recuperabile per l'esercizio corrente
+  const ej = EJERCICIOS.find(e=>e.id===ejercicio)||EJERCICIOS[1];
+  const PAESI = ["IT","FR","DE","AT","BE"];
+  let totEstera = 0;
+  data.invoices.forEach(inv => {
+    if (inv.type !== "ricevuta") return;
+    const d = inv.fechaOperacion||inv.date||"";
+    if (!d || d<ej.from || d>ej.to) return;
+    if (!inv.paisIvaOrigen || inv.paisIvaOrigen==="ES") return;
+    if (!PAESI.includes(inv.paisIvaOrigen)) return;
+    totEstera += parseFloat(inv.ivaEsteraAmount)||0;
+  });
 
   return (
     <div className="card" style={{ marginBottom:16, borderLeft:"4px solid #3949ab" }}>
       <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14 }}>
         <div style={{ fontSize:10,fontWeight:700,letterSpacing:"1.5px",textTransform:"uppercase",color:"#bbb" }}>
-          🇪🇸 IVA España — Modelo 303 / REDEME
+          🇪🇸 IVA España &amp; 🇮🇹🇫🇷 IVA Estera
         </div>
-        <div style={{ display:"flex",gap:8,alignItems:"center" }}>
-          <button className="btn-ghost" style={{ fontSize:11 }} onClick={onDetail}>📊 Detalle →</button>
-          <span style={{
-            background: isCredito?"#e8f5e9":"#ffebee",
-            border:`1.5px solid ${isCredito?"#a5d6a7":"#ef9a9a"}`,
-            borderRadius:6, padding:"4px 12px", fontSize:12, fontWeight:800,
-            color: isCredito?"#2e7d32":"#E30613"
-          }}>
-            {isCredito?"✓ Crédito":"⚠ Deuda"}: {fmt(Math.abs(ivaCredito))}
-          </span>
-        </div>
+        <button className="btn-ghost" style={{ fontSize:11 }} onClick={onDetail}>📊 Detalle completo →</button>
       </div>
-
-      <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr 1fr 1fr",gap:12,marginBottom:12 }}>
-        <div style={{ textAlign:"center" }}>
-          <div style={{ fontSize:10,color:"#bbb",fontWeight:700,letterSpacing:"0.1em",marginBottom:4 }}>SOPORTADO</div>
-          <div style={{ fontSize:20,fontWeight:800,color:"#3949ab" }}>{fmt(ivaSop)}</div>
-          <div style={{ fontSize:10,color:"#bbb",marginTop:2 }}>IVA acquisti ES</div>
+      <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:16 }}>
+        <div style={{ textAlign:"center",padding:"10px",background:isCredito?"#f0fff4":"#fff5f5",borderRadius:8,border:`1.5px solid ${isCredito?"#a5d6a7":"#ef9a9a"}` }}>
+          <div style={{ fontSize:10,color:"#bbb",fontWeight:700,textTransform:"uppercase",letterSpacing:"0.1em",marginBottom:4 }}>IVA ES — Crédito neto</div>
+          <div style={{ fontSize:24,fontWeight:900,color:isCredito?"#28a745":"#E30613" }}>{fmt(Math.abs(ivaCredito))}</div>
+          <div style={{ fontSize:10,color:isCredito?"#28a745":"#E30613",marginTop:2,fontWeight:700 }}>{isCredito?"✓ crédito AEAT":"⚠ deuda AEAT"}</div>
         </div>
-        <div style={{ textAlign:"center" }}>
-          <div style={{ fontSize:10,color:"#bbb",fontWeight:700,letterSpacing:"0.1em",marginBottom:4 }}>REPERCUTIDO</div>
-          <div style={{ fontSize:20,fontWeight:800,color:"#E30613" }}>{fmt(ivaRep)}</div>
-          <div style={{ fontSize:10,color:"#bbb",marginTop:2 }}>IVA vendite</div>
+        <div style={{ textAlign:"center",padding:"10px",background:"#e8f5e9",borderRadius:8,border:"1.5px solid #a5d6a7" }}>
+          <div style={{ fontSize:10,color:"#bbb",fontWeight:700,textTransform:"uppercase",letterSpacing:"0.1em",marginBottom:4 }}>REDEME devuelto</div>
+          <div style={{ fontSize:24,fontWeight:900,color:"#28a745" }}>{fmt(ivaDevol)}</div>
+          <div style={{ fontSize:10,color:"#bbb",marginTop:2 }}>rimborso ricevuto</div>
         </div>
-        <div style={{ textAlign:"center" }}>
-          <div style={{ fontSize:10,color:"#bbb",fontWeight:700,letterSpacing:"0.1em",marginBottom:4 }}>CREDITO NETTO</div>
-          <div style={{ fontSize:20,fontWeight:800,color:isCredito?"#28a745":"#E30613" }}>{fmt(Math.abs(ivaCredito))}</div>
-          <div style={{ fontSize:10,color:"#bbb",marginTop:2 }}>{isCredito?"da recuperare":"da versare"}</div>
-        </div>
-        <div style={{ textAlign:"center" }}>
-          <div style={{ fontSize:10,color:"#bbb",fontWeight:700,letterSpacing:"0.1em",marginBottom:4 }}>DEVUELTO AEAT</div>
-          <div style={{ fontSize:20,fontWeight:800,color:"#28a745" }}>{fmt(ivaDevol)}</div>
-          <div style={{ fontSize:10,color:"#bbb",marginTop:2 }}>REDEME ricevuto</div>
-        </div>
-      </div>
-
-      <div style={{ background:"#F5F5F5",borderRadius:6,height:8,overflow:"hidden",marginBottom:6 }}>
-        <div style={{
-          height:"100%", borderRadius:6,
-          background: isCredito?"linear-gradient(90deg,#3949ab,#28a745)":"linear-gradient(90deg,#E30613,#b8860b)",
-          width:`${Math.max(perc,2)}%`, transition:"width 0.4s"
-        }} />
-      </div>
-      <div style={{ fontSize:11,color:"#bbb",textAlign:"right" }}>
-        Repercutido/Soportado: {perc.toFixed(1)}% · <strong>REDEME attivo</strong> · IVA estera (IT/FR/AT) → card separata
-      </div>
-    </div>
-  );
-}
-
-// ── CARD IVA ESTERA (Direttiva 2008/9/CE) ────────────────────────────────────
-function IvaEsteraCard({ data, ejercicio, EJERCICIOS, exportIvaEsteraCSV, setBimModal }) {
-  const ej    = EJERCICIOS.find(e=>e.id===ejercicio) || EJERCICIOS[1];
-  const anno  = ej.from.slice(0,4);
-  const PAESI = ["IT","FR","DE","AT","BE"];
-  const flagMap = IVA_FLAGS;
-
-  const trimestri = [
-    { id:"T1", mesi:[1,2,3], scad:`30/04/${anno}` },
-    { id:"T2", mesi:[4,5,6], scad:`31/07/${anno}` },
-    { id:"T3", mesi:[7,8,9], scad:`31/10/${anno}` },
-    { id:"T4", mesi:[10,11,12], scad:`31/01/${parseInt(anno)+1}` },
-  ];
-
-  // Calcolo per trimestre — fonte canonica: fatture con paisIvaOrigen + ivaEsteraAmount
-  const ivaByTrim = {};
-  trimestri.forEach(t => { ivaByTrim[t.id] = { ...Object.fromEntries(PAESI.map(p=>[p,0])), tot:0 }; });
-
-  data.invoices.forEach(inv => {
-    if (inv.type !== "ricevuta") return;
-    const d = inv.fechaOperacion || inv.date || "";
-    if (!d || d < ej.from || d > ej.to) return;
-    if (!inv.paisIvaOrigen || inv.paisIvaOrigen === "ES") return;
-    const iva = parseFloat(inv.ivaEsteraAmount) || 0;
-    if (iva <= 0) return;
-    const mo = parseInt(d.slice(5,7));
-    const t  = mo<=3?"T1":mo<=6?"T2":mo<=9?"T3":"T4";
-    const p  = inv.paisIvaOrigen;
-    if (!PAESI.includes(p)) return;
-    ivaByTrim[t][p] += iva;
-    ivaByTrim[t].tot += iva;
-  });
-
-  const totAnnuo = { tot:0, ...Object.fromEntries(PAESI.map(p=>[p,0])) };
-  Object.values(ivaByTrim).forEach(t => {
-    PAESI.forEach(p => { totAnnuo[p] += t[p]; });
-    totAnnuo.tot += t.tot;
-  });
-
-  const hasDati = totAnnuo.tot > 0;
-
-  return (
-    <div className="card" style={{ marginBottom:16, borderLeft:"4px solid #F5C800" }}>
-      {/* Header */}
-      <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14 }}>
-        <div style={{ fontSize:10,fontWeight:700,letterSpacing:"1.5px",textTransform:"uppercase",color:"#bbb" }}>
-          🇮🇹🇫🇷🇦🇹 IVA Estera — Dir. 2008/9/CE · Pratica trimestrale
-        </div>
-        <div style={{ display:"flex",gap:6 }}>
-          <IvaEsteraExportBtn exportIvaEsteraCSV={exportIvaEsteraCSV} ejercicio={ejercicio} />
-          <button className="btn-ghost" style={{ fontSize:11 }} onClick={()=>setBimModal(true)}>Info →</button>
-        </div>
-      </div>
-
-      {/* Totale annuo — badge prominente */}
-      <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",
-        padding:"12px 16px",borderRadius:8,marginBottom:14,
-        background: totAnnuo.tot>=IVA_ESTERA_SOGLIA_ANNUA?"#e8f5e9":"#fffde7",
-        border:`1.5px solid ${totAnnuo.tot>=IVA_ESTERA_SOGLIA_ANNUA?"#a5d6a7":"#ffe082"}` }}>
-        <div>
-          <div style={{ fontSize:10,fontWeight:700,color:"#999",textTransform:"uppercase",letterSpacing:"0.1em",marginBottom:2 }}>
-            Totale recuperabile {anno}
+        <div style={{ textAlign:"center",padding:"10px",background:totEstera>=IVA_ESTERA_SOGLIA_ANNUA?"#e8f5e9":"#fffde7",borderRadius:8,border:`1.5px solid ${totEstera>=IVA_ESTERA_SOGLIA_ANNUA?"#a5d6a7":"#ffe082"}` }}>
+          <div style={{ fontSize:10,color:"#bbb",fontWeight:700,textTransform:"uppercase",letterSpacing:"0.1em",marginBottom:4 }}>IVA Estera recuperabile</div>
+          <div style={{ fontSize:24,fontWeight:900,color:totEstera>=IVA_ESTERA_SOGLIA_ANNUA?"#28a745":"#b8860b" }}>{fmt(totEstera)}</div>
+          <div style={{ fontSize:10,color:totEstera>=IVA_ESTERA_SOGLIA_ANNUA?"#28a745":"#b8860b",marginTop:2,fontWeight:700 }}>
+            {totEstera>=IVA_ESTERA_SOGLIA_ANNUA?"✓ soglia annua ok":"⚠ sotto soglia €50"}
           </div>
-          <div style={{ fontSize:26,fontWeight:800,color:totAnnuo.tot>=IVA_ESTERA_SOGLIA_ANNUA?"#28a745":"#b8860b" }}>
-            {fmt(totAnnuo.tot)}
-          </div>
-          {hasDati && (
-            <div style={{ display:"flex",flexWrap:"wrap",gap:4,marginTop:6 }}>
-              {PAESI.filter(p=>totAnnuo[p]>0).map(p=>(
-                <span key={p} style={{ display:"inline-flex",alignItems:"center",gap:3,
-                  background:"white",border:"1px solid #e0e0e0",borderRadius:20,
-                  padding:"2px 8px",fontSize:11,fontWeight:700 }}>
-                  {flagMap[p]} {fmt(totAnnuo[p])}
-                </span>
-              ))}
-            </div>
-          )}
         </div>
-        <div style={{ textAlign:"right" }}>
-          {totAnnuo.tot >= IVA_ESTERA_SOGLIA_ANNUA
-            ? <div style={{ fontSize:11,color:"#28a745",fontWeight:700 }}>✓ Soglia €{IVA_ESTERA_SOGLIA_ANNUA} annua superata<br/>Aprire pratica Hacienda</div>
-            : <div style={{ fontSize:11,color:"#b8860b" }}>⚠ Sotto soglia €{IVA_ESTERA_SOGLIA_ANNUA} annua<br/>Valutare se conviene</div>
-          }
-          <div style={{ fontSize:10,color:"#bbb",marginTop:4 }}>Scad. annuale: 30/09/{parseInt(anno)+1}</div>
-        </div>
-      </div>
-
-      {/* Griglia trimestri */}
-      <div style={{ display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:8 }}>
-        {trimestri.map(t => {
-          const d = ivaByTrim[t.id];
-          const okTrim = d.tot > 50;
-          return (
-            <div key={t.id} style={{
-              background: d.tot>0?"#fffde7":"#FAFAFA",
-              border:`1.5px solid ${d.tot>0?"#ffe082":"#E0E0E0"}`,
-              borderRadius:8, padding:"10px 12px", textAlign:"center"
-            }}>
-              <div style={{ fontSize:12,fontWeight:800,color:"#1A1A1A",marginBottom:4 }}>{t.id}</div>
-              <div style={{ fontWeight:800,fontSize:16,color:d.tot>0?"#b8860b":"#bbb" }}>{fmt(d.tot)}</div>
-              <div style={{ fontSize:9,color:"#bbb",marginTop:2 }}>scad. {t.scad}</div>
-              {d.tot > 0 && (
-                <div style={{ display:"flex",flexWrap:"wrap",gap:3,marginTop:5,justifyContent:"center" }}>
-                  {PAESI.filter(p=>d[p]>0).map(p=>(
-                    <span key={p} style={{ fontSize:10,background:"white",border:"1px solid #e0e0e0",
-                      borderRadius:20,padding:"1px 6px",fontWeight:600 }}>
-                      {flagMap[p]} {fmt(d[p])}
-                    </span>
-                  ))}
-                </div>
-              )}
-              <div style={{ marginTop:5,fontSize:9,fontWeight:700,
-                color: d.tot>0?(okTrim?"#2e7d32":"#E30613"):"#bbb" }}>
-                {d.tot>0?(okTrim?"✓ >€50":"✗ <€50 soglia trim."):"—"}
-              </div>
-            </div>
-          );
-        })}
       </div>
     </div>
   );
@@ -2087,7 +1894,7 @@ const ej = EJERCICIOS.find(e=>e.id===ejercicio)||EJERCICIOS[2];
         );
 }
 
-function DashboardTab({ data, metrics, forecast, ejercicio, EJERCICIOS, bimModal, setBimModal, aeatModal, setAeatModal, exportIvaEsteraCSV }) {
+function DashboardTab({ data, metrics, forecast, ejercicio, EJERCICIOS, setIvaModal, exportIvaEsteraCSV }) {
   return (
     <div>
       <div className="section-title" style={{ marginBottom:20 }}>Panoramica</div>
@@ -2100,7 +1907,7 @@ function DashboardTab({ data, metrics, forecast, ejercicio, EJERCICIOS, bimModal
         <div className="kpi-card blue"><div className="kpi-label">Liquidez estimada</div><div className="kpi-value" style={{ color:metrics.liquidita>=0?"#3949ab":"#E30613" }}>{fmt(metrics.liquidita)}</div></div>
       </div>
 
-      <IvaAeatCard metrics={metrics} onDetail={()=>setAeatModal(true)} />
+      <IvaResumenCard metrics={metrics} data={data} ejercicio={ejercicio} EJERCICIOS={EJERCICIOS} onDetail={()=>setIvaModal(true)} />
 
       <div className="card" style={{ marginBottom:16 }}>
         <div style={{ fontSize:10, fontWeight:700, letterSpacing:"1.5px", textTransform:"uppercase", color:"#bbb", marginBottom:12 }}>Forecast liquidez 90 días</div>
@@ -2117,202 +1924,277 @@ function DashboardTab({ data, metrics, forecast, ejercicio, EJERCICIOS, bimModal
         </ResponsiveContainer>
       </div>
 
-      {/* ── RECUPERO IVA ESTERA ── */}
-      <IvaEsteraCard data={data} ejercicio={ejercicio} EJERCICIOS={EJERCICIOS} exportIvaEsteraCSV={exportIvaEsteraCSV} setBimModal={setBimModal} />
-
-      {/* ── PANNELLO 1: CICLO DI CASSA (DSO / DPO) ── */}
-            <CicloCassaCard data={data} metrics={metrics} ejercicio={ejercicio} EJERCICIOS={EJERCICIOS} />
-
-      {/* ── PANNELLO 2: CASH FLOW REALE DAL BANCO (mensile) ── */}
-            <CashFlowMensileCard data={data} metrics={metrics} ejercicio={ejercicio} EJERCICIOS={EJERCICIOS} />
-
-      {/* ── PANNELLO 3: CREDITI SCADUTI ── */}
-            <CreditiScadutiCard data={data} metrics={metrics} ejercicio={ejercicio} EJERCICIOS={EJERCICIOS} />
-
-      {/* ── PANNELLO 4: ESPOSIZIONE SUBVETTORI ── */}
-            <EsposizioneFornitoriCard data={data} metrics={metrics} ejercicio={ejercicio} EJERCICIOS={EJERCICIOS} />
+      <CicloCassaCard data={data} metrics={metrics} ejercicio={ejercicio} EJERCICIOS={EJERCICIOS} />
+      <CashFlowMensileCard data={data} metrics={metrics} ejercicio={ejercicio} EJERCICIOS={EJERCICIOS} />
+      <CreditiScadutiCard data={data} metrics={metrics} ejercicio={ejercicio} EJERCICIOS={EJERCICIOS} />
+      <EsposizioneFornitoriCard data={data} metrics={metrics} ejercicio={ejercicio} EJERCICIOS={EJERCICIOS} />
     </div>
   );
 }
 
-// ── AEAT MODAL — IVA ES pura (Modelo 303 / REDEME) ──────────────────────────
-function AeatModal({ data, ejercicio, EJERCICIOS, onClose }) {
+// ── IVA MODAL UNIFICATO (tabbed: IVA ES + IVA Estera) ────────────────────────
+function IvaModal({ data, metrics, ejercicio, EJERCICIOS, exportIvaEsteraCSV, onClose }) {
+  const [activeTab, setActiveTab] = useState("es");
   const ej = EJERCICIOS.find(e=>e.id===ejercicio)||EJERCICIOS[2];
+  const anno = ej.from.slice(0,4);
 
-  // Solo fatture con IVA ES (paisIvaOrigen==="ES" o non classificate come estere)
+  // ── Calcoli IVA ES ──
   const invES = data.invoices.filter(inv=>{
-    const d = inv.fechaOperacion||inv.date||"";
+    const d=inv.fechaOperacion||inv.date||"";
     if(d<ej.from||d>ej.to) return false;
-    const isEstera = inv.paisIvaOrigen && inv.paisIvaOrigen !== "ES";
-    return !isEstera;
+    return !(inv.paisIvaOrigen && inv.paisIvaOrigen!=="ES");
   });
-
-  const emesseES   = invES.filter(i=>i.type==="emessa");
-  const ricevuteES = invES.filter(i=>i.type==="ricevuta");
-
-  // IVA ES per trimestre
-  const trimestri = ["Q1","Q2","Q3","Q4"];
-  const byTrim = {};
-  trimestri.forEach(t=>{ byTrim[t]={ soportado:0, repercutido:0, devuelto:0, fatture:[] }; });
-
-  const getTrim = (d) => {
-    const mo = parseInt(d.slice(5,7));
-    return mo<=3?"Q1":mo<=6?"Q2":mo<=9?"Q3":"Q4";
-  };
-
-  ricevuteES.forEach(inv=>{
-    const d = inv.fechaOperacion||inv.date||"";
-    const t = getTrim(d);
-    const iva = parseFloat(inv.ivaAmount||0);
-    if(iva>0){ byTrim[t].soportado+=iva; byTrim[t].fatture.push(inv); }
+  const getTrim = d => { const mo=parseInt(d.slice(5,7)); return mo<=3?"Q1":mo<=6?"Q2":mo<=9?"Q3":"Q4"; };
+  const byTrimES = {};
+  ["Q1","Q2","Q3","Q4"].forEach(t=>{ byTrimES[t]={ soportado:0,repercutido:0,devuelto:0 }; });
+  invES.filter(i=>i.type==="ricevuta").forEach(inv=>{
+    const d=inv.fechaOperacion||inv.date||""; const iva=parseFloat(inv.ivaAmount||0);
+    if(iva>0) byTrimES[getTrim(d)].soportado+=iva;
   });
-  emesseES.forEach(inv=>{
-    const d = inv.fechaOperacion||inv.date||"";
-    const t = getTrim(d);
-    const iva = parseFloat(inv.ivaAmount||0);
-    if(iva>0) byTrim[t].repercutido+=iva;
+  invES.filter(i=>i.type==="emessa").forEach(inv=>{
+    const d=inv.fechaOperacion||inv.date||""; const iva=parseFloat(inv.ivaAmount||0);
+    if(iva>0) byTrimES[getTrim(d)].repercutido+=iva;
   });
-
-  // Rimborsi AEAT ricevuti (movimenti entrata con "AEAT" nella descrizione)
   data.movements.forEach(m=>{
-    if(m.type==="entrata" && (m.description||"").toUpperCase().includes("AEAT")){
-      const d = m.date||"";
-      if(d>=ej.from&&d<=ej.to){
-        const t = getTrim(d);
-        byTrim[t].devuelto += parseFloat(m.amount||0);
-      }
+    if(m.type==="entrata"&&(m.description||"").toUpperCase().includes("AEAT")){
+      const d=m.date||""; if(d>=ej.from&&d<=ej.to) byTrimES[getTrim(d)].devuelto+=parseFloat(m.amount||0);
     }
   });
-
-  // Saldo cumulato (contatore che somma e resta)
-  let saldoCumulato = 0;
-  const rows = trimestri.map(t=>{
-    const { soportado, repercutido, devuelto } = byTrim[t];
-    const credito303 = soportado - repercutido;  // positivo = credito AEAT
-    saldoCumulato += credito303 - devuelto;
-    return { trim:t, soportado, repercutido, credito303, devuelto, saldoCumulato };
+  let saldoCumulatoES=0;
+  const rowsES = ["Q1","Q2","Q3","Q4"].map(t=>{
+    const {soportado,repercutido,devuelto}=byTrimES[t];
+    const credito303=soportado-repercutido;
+    saldoCumulatoES+=credito303-devuelto;
+    return {trim:t,soportado,repercutido,credito303,devuelto,saldoCumulato:saldoCumulatoES};
   });
-
-  const totSop   = rows.reduce((s,r)=>s+r.soportado,0);
-  const totRep   = rows.reduce((s,r)=>s+r.repercutido,0);
-  const totDevol = rows.reduce((s,r)=>s+r.devuelto,0);
-  const saldoFinale = rows[rows.length-1].saldoCumulato;
-
-  // Fatture ES con IVA soportada (per dettaglio)
-  const fatES = ricevuteES.filter(i=>parseFloat(i.ivaAmount||0)>0)
+  const totSop=rowsES.reduce((s,r)=>s+r.soportado,0);
+  const totRep=rowsES.reduce((s,r)=>s+r.repercutido,0);
+  const totDevol=rowsES.reduce((s,r)=>s+r.devuelto,0);
+  const saldoFinale=rowsES[3].saldoCumulato;
+  const fatES=invES.filter(i=>i.type==="ricevuta"&&parseFloat(i.ivaAmount||0)>0)
     .sort((a,b)=>(a.fechaOperacion||a.date||"").localeCompare(b.fechaOperacion||b.date||""));
+
+  // ── Calcoli IVA Estera ──
+  const PAESI=["IT","FR","DE","AT","BE"];
+  const trimEstera=[
+    {id:"T1",mesi:[1,2,3],scad:`30/04/${anno}`},
+    {id:"T2",mesi:[4,5,6],scad:`31/07/${anno}`},
+    {id:"T3",mesi:[7,8,9],scad:`31/10/${anno}`},
+    {id:"T4",mesi:[10,11,12],scad:`31/01/${parseInt(anno)+1}`},
+  ];
+  const ivaByTrim={};
+  trimEstera.forEach(t=>{ivaByTrim[t.id]={...Object.fromEntries(PAESI.map(p=>[p,0])),tot:0};});
+  data.invoices.forEach(inv=>{
+    if(inv.type!=="ricevuta") return;
+    const d=inv.fechaOperacion||inv.date||"";
+    if(!d||d<ej.from||d>ej.to) return;
+    if(!inv.paisIvaOrigen||inv.paisIvaOrigen==="ES") return;
+    const iva=parseFloat(inv.ivaEsteraAmount)||0; if(iva<=0) return;
+    const mo=parseInt(d.slice(5,7));
+    const t=mo<=3?"T1":mo<=6?"T2":mo<=9?"T3":"T4";
+    const p=inv.paisIvaOrigen; if(!PAESI.includes(p)) return;
+    ivaByTrim[t][p]+=iva; ivaByTrim[t].tot+=iva;
+  });
+  const totAnnuo={tot:0,...Object.fromEntries(PAESI.map(p=>[p,0]))};
+  Object.values(ivaByTrim).forEach(t=>{PAESI.forEach(p=>{totAnnuo[p]+=t[p];}); totAnnuo.tot+=t.tot;});
+  const fatEstera=data.invoices.filter(inv=>{
+    if(inv.type!=="ricevuta") return false;
+    const d=inv.fechaOperacion||inv.date||"";
+    if(!d||d<ej.from||d>ej.to) return false;
+    return inv.paisIvaOrigen&&inv.paisIvaOrigen!=="ES"&&parseFloat(inv.ivaEsteraAmount||0)>0;
+  }).sort((a,b)=>(a.fechaOperacion||a.date||"").localeCompare(b.fechaOperacion||b.date||""));
+
+  const tabStyle = (id) => ({
+    padding:"8px 20px", border:"none", cursor:"pointer", fontWeight:700, fontSize:13,
+    borderBottom: activeTab===id?"3px solid #E30613":"3px solid transparent",
+    color: activeTab===id?"#E30613":"#999", background:"transparent"
+  });
 
   return (
     <div className="modal-overlay" onClick={onClose}>
-      <div className="modal" style={{ maxWidth:700 }} onClick={e=>e.stopPropagation()}>
+      <div className="modal" style={{ maxWidth:780,maxHeight:"90vh",overflowY:"auto" }} onClick={e=>e.stopPropagation()}>
         {/* Header */}
-        <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20 }}>
-          <div>
-            <div className="modal-title">📊 IVA España — Modelo 303 / REDEME</div>
-            <div style={{ fontSize:11,color:"#bbb",marginTop:3 }}>Solo IVA ES — esclusa IVA estera UE (gestita separatamente)</div>
-          </div>
+        <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:0 }}>
+          <div className="modal-title">📊 IVA — Detalle completo</div>
           <button onClick={onClose} style={{ background:"none",fontSize:20,color:"#999" }}>×</button>
         </div>
-
-        {/* Saldo totale — il contatore */}
-        <div style={{ background: saldoFinale>=0?"#e8f5e9":"#ffebee", border:`2px solid ${saldoFinale>=0?"#a5d6a7":"#ef9a9a"}`, borderRadius:12, padding:"16px 20px", marginBottom:20, display:"flex", justifyContent:"space-between", alignItems:"center" }}>
-          <div>
-            <div style={{ fontSize:10,fontWeight:700,color:saldoFinale>=0?"#2e7d32":"#c62828",letterSpacing:"1.5px",textTransform:"uppercase" }}>
-              {saldoFinale>=0?"✓ CREDITO AEAT ACUMULADO":"⚠ DEUDA AEAT"}
-            </div>
-            <div style={{ fontSize:32,fontWeight:900,color:saldoFinale>=0?"#28a745":"#E30613",lineHeight:1,marginTop:4 }}>
-              {fmt(Math.abs(saldoFinale))}
-            </div>
-            <div style={{ fontSize:11,color:"#999",marginTop:4 }}>
-              Soportado {fmt(totSop)} − Repercutido {fmt(totRep)} − Devuelto {fmt(totDevol)}
-            </div>
-          </div>
-          <div style={{ textAlign:"right" }}>
-            <div style={{ fontSize:10,color:"#bbb",fontWeight:700 }}>REDEME ACTIVO</div>
-            <div style={{ fontSize:12,color:"#3949ab",fontWeight:700,marginTop:4 }}>Rimborso mensile</div>
-            <div style={{ fontSize:10,color:"#bbb",marginTop:2 }}>Scadenza 303: 20° giorno mese successivo</div>
-          </div>
+        {/* Tabs */}
+        <div style={{ display:"flex",borderBottom:"1.5px solid #F0F0F0",marginBottom:20,marginTop:12 }}>
+          <button style={tabStyle("es")} onClick={()=>setActiveTab("es")}>🇪🇸 IVA España 303 / REDEME</button>
+          <button style={tabStyle("estera")} onClick={()=>setActiveTab("estera")}>🇮🇹🇫🇷 IVA Estera UE</button>
         </div>
 
-        {/* Tabella trimestrale con contatore */}
-        <div style={{ marginBottom:20 }}>
-          <div style={{ fontSize:10,fontWeight:700,letterSpacing:"1.5px",textTransform:"uppercase",color:"#bbb",marginBottom:10 }}>Riepilogo trimestrale — contatore cumulato</div>
-          <table>
-            <thead>
-              <tr>
-                <th>Trim.</th>
-                <th style={{ textAlign:"right" }}>Soportado</th>
-                <th style={{ textAlign:"right" }}>Repercutido</th>
-                <th style={{ textAlign:"right" }}>Credito 303</th>
-                <th style={{ textAlign:"right" }}>Devuelto AEAT</th>
-                <th style={{ textAlign:"right" }}>Saldo cumulato</th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((r,i)=>{
-                const hasData = r.soportado>0||r.repercutido>0||r.devuelto>0;
-                return (
-                  <tr key={r.trim} style={{ background: !hasData?"transparent": r.saldoCumulato>=0?"#f8fff8":"#fff8f8" }}>
+        {/* ── TAB IVA ES ── */}
+        {activeTab==="es" && (
+          <div>
+            <div style={{ background:saldoFinale>=0?"#e8f5e9":"#ffebee",border:`2px solid ${saldoFinale>=0?"#a5d6a7":"#ef9a9a"}`,borderRadius:12,padding:"16px 20px",marginBottom:20,display:"flex",justifyContent:"space-between",alignItems:"center" }}>
+              <div>
+                <div style={{ fontSize:10,fontWeight:700,color:saldoFinale>=0?"#2e7d32":"#c62828",letterSpacing:"1.5px",textTransform:"uppercase" }}>
+                  {saldoFinale>=0?"✓ CREDITO AEAT ACUMULADO":"⚠ DEUDA AEAT"}
+                </div>
+                <div style={{ fontSize:32,fontWeight:900,color:saldoFinale>=0?"#28a745":"#E30613",lineHeight:1,marginTop:4 }}>{fmt(Math.abs(saldoFinale))}</div>
+                <div style={{ fontSize:11,color:"#999",marginTop:4 }}>Soportado {fmt(totSop)} − Repercutido {fmt(totRep)} − Devuelto {fmt(totDevol)}</div>
+              </div>
+              <div style={{ textAlign:"right" }}>
+                <div style={{ fontSize:10,color:"#bbb",fontWeight:700 }}>REDEME ACTIVO</div>
+                <div style={{ fontSize:12,color:"#3949ab",fontWeight:700,marginTop:4 }}>Rimborso mensile</div>
+                <div style={{ fontSize:10,color:"#bbb",marginTop:2 }}>Scadenza 303: 20° gg mese succ.</div>
+              </div>
+            </div>
+            <div style={{ marginBottom:20 }}>
+              <div style={{ fontSize:10,fontWeight:700,letterSpacing:"1.5px",textTransform:"uppercase",color:"#bbb",marginBottom:10 }}>Riepilogo trimestrale — contatore cumulato</div>
+              <table>
+                <thead><tr><th>Trim.</th><th style={{ textAlign:"right" }}>Soportado</th><th style={{ textAlign:"right" }}>Repercutido</th><th style={{ textAlign:"right" }}>Credito 303</th><th style={{ textAlign:"right" }}>Devuelto AEAT</th><th style={{ textAlign:"right" }}>Saldo cumulato</th></tr></thead>
+                <tbody>{rowsES.map(r=>{
+                  const hasData=r.soportado>0||r.repercutido>0||r.devuelto>0;
+                  return (<tr key={r.trim} style={{ background:!hasData?"transparent":r.saldoCumulato>=0?"#f8fff8":"#fff8f8" }}>
                     <td style={{ fontWeight:700,color:"#E30613" }}>{r.trim}</td>
                     <td style={{ textAlign:"right",color:r.soportado?"#3949ab":"#bbb" }}>{r.soportado?fmt(r.soportado):"—"}</td>
                     <td style={{ textAlign:"right",color:r.repercutido?"#E30613":"#bbb" }}>{r.repercutido?fmt(r.repercutido):"—"}</td>
-                    <td style={{ textAlign:"right",fontWeight:600,color:r.credito303>0?"#28a745":r.credito303<0?"#E30613":"#bbb" }}>
-                      {r.credito303!==0?(r.credito303>0?"+":"")+fmt(r.credito303):"—"}
-                    </td>
+                    <td style={{ textAlign:"right",fontWeight:600,color:r.credito303>0?"#28a745":r.credito303<0?"#E30613":"#bbb" }}>{r.credito303!==0?(r.credito303>0?"+":"")+fmt(r.credito303):"—"}</td>
                     <td style={{ textAlign:"right",color:r.devuelto?"#28a745":"#bbb" }}>{r.devuelto?fmt(r.devuelto):"—"}</td>
-                    <td style={{ textAlign:"right",fontWeight:800,fontSize:14,color:r.saldoCumulato>=0?"#28a745":"#E30613" }}>
-                      {fmt(r.saldoCumulato)}
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-            <tfoot>
-              <tr style={{ borderTop:"2px solid #E0E0E0",background:"#FAFAFA" }}>
-                <td style={{ fontWeight:700 }}>TOTAL</td>
-                <td style={{ textAlign:"right",fontWeight:700,color:"#3949ab" }}>{fmt(totSop)}</td>
-                <td style={{ textAlign:"right",fontWeight:700,color:"#E30613" }}>{fmt(totRep)}</td>
-                <td style={{ textAlign:"right",fontWeight:700,color:totSop-totRep>=0?"#28a745":"#E30613" }}>{fmt(totSop-totRep)}</td>
-                <td style={{ textAlign:"right",fontWeight:700,color:"#28a745" }}>{totDevol?fmt(totDevol):"—"}</td>
-                <td style={{ textAlign:"right",fontWeight:900,fontSize:15,color:saldoFinale>=0?"#28a745":"#E30613" }}>{fmt(saldoFinale)}</td>
-              </tr>
-            </tfoot>
-          </table>
-        </div>
-
-        {/* Dettaglio fatture con IVA ES */}
-        {fatES.length > 0 && (
-          <div style={{ marginBottom:16 }}>
-            <div style={{ fontSize:10,fontWeight:700,letterSpacing:"1.5px",textTransform:"uppercase",color:"#bbb",marginBottom:10 }}>
-              Fatture acquisti con IVA ES ({fatES.length})
-            </div>
-            <div style={{ maxHeight:220,overflowY:"auto" }}>
-              <table>
-                <thead><tr><th>N°</th><th>Fecha</th><th>Proveedor</th><th style={{ textAlign:"right" }}>Base imp.</th><th style={{ textAlign:"right" }}>IVA</th><th>%</th><th>Stato</th></tr></thead>
-                <tbody>
-                  {fatES.map(inv=>(
-                    <tr key={inv.id}>
-                      <td style={{ fontSize:11,color:"#E30613",fontWeight:700 }}>{inv.number||"—"}</td>
-                      <td style={{ fontSize:11,color:"#999" }}>{fmtDate(inv.fechaOperacion||inv.date)}</td>
-                      <td style={{ fontSize:11,maxWidth:140,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap" }}>{inv.supplier||"—"}</td>
-                      <td style={{ textAlign:"right",fontSize:11 }}>{fmt(inv.netAmount)}</td>
-                      <td style={{ textAlign:"right",fontWeight:600,color:"#3949ab",fontSize:11 }}>{fmt(inv.ivaAmount)}</td>
-                      <td style={{ fontSize:10,color:"#bbb" }}>{inv.ivaType}</td>
-                      <td><span className={`badge ${inv.status==="riconciliata"?"badge-blue":inv.status==="pagata"?"badge-green":"badge-yellow"}`}>{inv.status}</span></td>
-                    </tr>
-                  ))}
-                </tbody>
+                    <td style={{ textAlign:"right",fontWeight:800,fontSize:14,color:r.saldoCumulato>=0?"#28a745":"#E30613" }}>{fmt(r.saldoCumulato)}</td>
+                  </tr>);
+                })}</tbody>
+                <tfoot><tr style={{ borderTop:"2px solid #E0E0E0",background:"#FAFAFA" }}>
+                  <td style={{ fontWeight:700 }}>TOTAL</td>
+                  <td style={{ textAlign:"right",fontWeight:700,color:"#3949ab" }}>{fmt(totSop)}</td>
+                  <td style={{ textAlign:"right",fontWeight:700,color:"#E30613" }}>{fmt(totRep)}</td>
+                  <td style={{ textAlign:"right",fontWeight:700,color:totSop-totRep>=0?"#28a745":"#E30613" }}>{fmt(totSop-totRep)}</td>
+                  <td style={{ textAlign:"right",fontWeight:700,color:"#28a745" }}>{totDevol?fmt(totDevol):"—"}</td>
+                  <td style={{ textAlign:"right",fontWeight:900,fontSize:15,color:saldoFinale>=0?"#28a745":"#E30613" }}>{fmt(saldoFinale)}</td>
+                </tr></tfoot>
               </table>
+            </div>
+            {fatES.length>0 && (
+              <div style={{ marginBottom:16 }}>
+                <div style={{ fontSize:10,fontWeight:700,letterSpacing:"1.5px",textTransform:"uppercase",color:"#bbb",marginBottom:10 }}>Fatture acquisti con IVA ES ({fatES.length})</div>
+                <div style={{ maxHeight:220,overflowY:"auto" }}>
+                  <table>
+                    <thead><tr><th>N°</th><th>Fecha</th><th>Proveedor</th><th style={{ textAlign:"right" }}>Base</th><th style={{ textAlign:"right" }}>IVA</th><th>%</th><th>Stato</th></tr></thead>
+                    <tbody>{fatES.map(inv=>(
+                      <tr key={inv.id}>
+                        <td style={{ fontSize:11,color:"#E30613",fontWeight:700 }}>{inv.number||"—"}</td>
+                        <td style={{ fontSize:11,color:"#999" }}>{fmtDate(inv.fechaOperacion||inv.date)}</td>
+                        <td style={{ fontSize:11,maxWidth:140,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap" }}>{inv.supplier||"—"}</td>
+                        <td style={{ textAlign:"right",fontSize:11 }}>{fmt(inv.netAmount)}</td>
+                        <td style={{ textAlign:"right",fontWeight:600,color:"#3949ab",fontSize:11 }}>{fmt(inv.ivaAmount)}</td>
+                        <td style={{ fontSize:10,color:"#bbb" }}>{inv.ivaType}</td>
+                        <td><span className={`badge ${inv.status==="riconciliata"?"badge-blue":inv.status==="pagata"?"badge-green":"badge-yellow"}`}>{inv.status}</span></td>
+                      </tr>
+                    ))}</tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+            <div style={{ background:"#fffde7",border:"1.5px solid #ffe082",borderRadius:8,padding:"10px 14px",fontSize:11,color:"#b8860b" }}>
+              ℹ️ IVA estera (IT/FR/DE/AT/BE) <strong>non</strong> transita nel Modelo 303 — gestita nella tab "IVA Estera UE".
             </div>
           </div>
         )}
 
-        <div style={{ background:"#fffde7",border:"1.5px solid #ffe082",borderRadius:8,padding:"10px 14px",marginBottom:16,fontSize:11,color:"#b8860b" }}>
-          ℹ️ <strong>IVA estera (IT/FR/DE/AT/BE)</strong> gestita separatamente tramite pratica Dir.2008/9/CE — vedi pannello "Recupero IVA Estera" nel dashboard.
-          La IVA estera <strong>non</strong> transita nel Modelo 303.
-        </div>
+        {/* ── TAB IVA ESTERA ── */}
+        {activeTab==="estera" && (
+          <div>
+            <div style={{ background:"#fffde7",border:"1.5px solid #ffe082",borderRadius:8,padding:"10px 14px",marginBottom:16,fontSize:12,color:"#b8860b" }}>
+              Procedura annuale (Dir. 2008/9/CE) · Scadenza: <strong>30/09 anno successivo</strong> · Soglia: <strong>€{IVA_ESTERA_SOGLIA_ANNUA} annuo</strong> · <strong>€{IVA_ESTERA_SOGLIA_TRIM} trimestre</strong>
+            </div>
+            {/* Totale annuo */}
+            <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",padding:"14px 18px",borderRadius:10,marginBottom:16,background:totAnnuo.tot>=IVA_ESTERA_SOGLIA_ANNUA?"#e8f5e9":"#fffde7",border:`1.5px solid ${totAnnuo.tot>=IVA_ESTERA_SOGLIA_ANNUA?"#a5d6a7":"#ffe082"}` }}>
+              <div>
+                <div style={{ fontSize:10,fontWeight:700,color:"#999",textTransform:"uppercase",letterSpacing:"0.1em",marginBottom:2 }}>Totale recuperabile {anno}</div>
+                <div style={{ fontSize:28,fontWeight:900,color:totAnnuo.tot>=IVA_ESTERA_SOGLIA_ANNUA?"#28a745":"#b8860b" }}>{fmt(totAnnuo.tot)}</div>
+                {totAnnuo.tot>0 && (
+                  <div style={{ display:"flex",flexWrap:"wrap",gap:4,marginTop:6 }}>
+                    {PAESI.filter(p=>totAnnuo[p]>0).map(p=>(
+                      <span key={p} style={{ display:"inline-flex",alignItems:"center",gap:3,background:"white",border:"1px solid #e0e0e0",borderRadius:20,padding:"2px 8px",fontSize:11,fontWeight:700 }}>
+                        {IVA_FLAGS[p]} {fmt(totAnnuo[p])}
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </div>
+              <div style={{ textAlign:"right" }}>
+                {totAnnuo.tot>=IVA_ESTERA_SOGLIA_ANNUA
+                  ?<div style={{ fontSize:11,color:"#28a745",fontWeight:700 }}>✓ Soglia annua superata<br/>Aprire pratica Hacienda</div>
+                  :<div style={{ fontSize:11,color:"#b8860b" }}>⚠ Sotto soglia €{IVA_ESTERA_SOGLIA_ANNUA}<br/>Valutare se conviene</div>}
+                <div style={{ fontSize:10,color:"#bbb",marginTop:4 }}>Scad.: 30/09/{parseInt(anno)+1}</div>
+                <div style={{ marginTop:8 }}><IvaEsteraExportBtn exportIvaEsteraCSV={exportIvaEsteraCSV} ejercicio={ejercicio} /></div>
+              </div>
+            </div>
+            {/* Griglia trimestri */}
+            <div style={{ display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:8,marginBottom:16 }}>
+              {trimEstera.map(t=>{
+                const d=ivaByTrim[t.id]; const okTrim=d.tot>IVA_ESTERA_SOGLIA_TRIM;
+                return (
+                  <div key={t.id} style={{ background:d.tot>0?"#fffde7":"#FAFAFA",border:`1.5px solid ${d.tot>0?"#ffe082":"#E0E0E0"}`,borderRadius:8,padding:"10px 12px",textAlign:"center" }}>
+                    <div style={{ fontSize:12,fontWeight:800,color:"#1A1A1A",marginBottom:4 }}>{t.id}</div>
+                    <div style={{ fontWeight:800,fontSize:16,color:d.tot>0?"#b8860b":"#bbb" }}>{fmt(d.tot)}</div>
+                    <div style={{ fontSize:9,color:"#bbb",marginTop:2 }}>scad. {t.scad}</div>
+                    {d.tot>0 && (
+                      <div style={{ display:"flex",flexWrap:"wrap",gap:3,marginTop:5,justifyContent:"center" }}>
+                        {PAESI.filter(p=>d[p]>0).map(p=>(
+                          <span key={p} style={{ fontSize:10,background:"white",border:"1px solid #e0e0e0",borderRadius:20,padding:"1px 6px",fontWeight:600 }}>{IVA_FLAGS[p]} {fmt(d[p])}</span>
+                        ))}
+                      </div>
+                    )}
+                    <div style={{ marginTop:5,fontSize:9,fontWeight:700,color:d.tot>0?(okTrim?"#2e7d32":"#E30613"):"#bbb" }}>
+                      {d.tot>0?(okTrim?"✓ >€50":"✗ <€50"):"—"}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+            {/* Dettaglio fatture estere */}
+            {fatEstera.length>0 && (
+              <div style={{ marginBottom:16 }}>
+                <div style={{ fontSize:10,fontWeight:700,letterSpacing:"1.5px",textTransform:"uppercase",color:"#bbb",marginBottom:10 }}>Fatture con IVA estera ({fatEstera.length})</div>
+                <div style={{ maxHeight:200,overflowY:"auto" }}>
+                  <table>
+                    <thead><tr><th>N°</th><th>Fecha</th><th>Proveedor</th><th>Paese</th><th style={{ textAlign:"right" }}>Base</th><th style={{ textAlign:"right" }}>IVA rec.</th><th>Stato</th></tr></thead>
+                    <tbody>{fatEstera.map(inv=>(
+                      <tr key={inv.id}>
+                        <td style={{ fontSize:11,color:"#E30613",fontWeight:700 }}>{inv.number||"—"}</td>
+                        <td style={{ fontSize:11,color:"#999" }}>{fmtDate(inv.fechaOperacion||inv.date)}</td>
+                        <td style={{ fontSize:11,maxWidth:130,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap" }}>{inv.supplier||"—"}</td>
+                        <td style={{ fontSize:12 }}>{IVA_FLAGS[inv.paisIvaOrigen]||inv.paisIvaOrigen}</td>
+                        <td style={{ textAlign:"right",fontSize:11 }}>{fmt(inv.ivaEsteraBase)}</td>
+                        <td style={{ textAlign:"right",fontWeight:700,color:"#b8860b",fontSize:11 }}>{fmt(inv.ivaEsteraAmount)}</td>
+                        <td><span className={`badge ${inv.status==="riconciliata"?"badge-blue":inv.status==="pagata"?"badge-green":"badge-yellow"}`}>{inv.status}</span></td>
+                      </tr>
+                    ))}</tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+            {/* Info procedura */}
+            {[
+              {paese:"🇮🇹 Italia",codice:"IT",aliquota:IVA_RATES.IT,note:"Pedaggi autostradali Italia via Euro Service GmbH. Targa GR516KN.",procedura:"Portale VIES + modulo Agenzia Entrate. Documenti: fatture IT + estratto conto + delega."},
+              {paese:"🇫🇷 Francia",codice:"FR",aliquota:IVA_RATES.FR,note:"Pedaggi DKV incluso Tunnel Frejus.",procedura:"Portale VIES + impots.gouv.fr. Documenti: fatture FR + estratto conto."},
+            ].map(p=>(
+              <div key={p.codice} style={{ border:"1.5px solid #E0E0E0",borderRadius:10,padding:"14px",marginBottom:12 }}>
+                <div style={{ display:"flex",justifyContent:"space-between",marginBottom:8 }}>
+                  <div style={{ fontWeight:800,fontSize:14 }}>{p.paese}</div>
+                  <span style={{ fontSize:10,color:"#999" }}>Dir. 2008/9/CE</span>
+                </div>
+                <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:10 }}>
+                  <div style={{ background:"#FAFAFA",borderRadius:6,padding:"6px 10px" }}>
+                    <div style={{ fontSize:10,color:"#bbb",fontWeight:700 }}>ALIQUOTA</div>
+                    <div style={{ fontWeight:800,fontSize:16 }}>{(p.aliquota*100).toFixed(0)}%</div>
+                  </div>
+                  <div style={{ background:"#FAFAFA",borderRadius:6,padding:"6px 10px" }}>
+                    <div style={{ fontSize:10,color:"#bbb",fontWeight:700 }}>SOGLIA TRIM.</div>
+                    <div style={{ fontWeight:800,fontSize:16,color:"#28a745" }}>€{IVA_ESTERA_SOGLIA_TRIM}</div>
+                  </div>
+                </div>
+                <div style={{ fontSize:11,color:"#666",marginBottom:6,lineHeight:1.5 }}><strong>Note:</strong> {p.note}</div>
+                <div style={{ fontSize:11,color:"#3949ab",background:"#f0f4ff",borderRadius:6,padding:"7px 10px",lineHeight:1.5 }}><strong>Procedura:</strong> {p.procedura}</div>
+              </div>
+            ))}
+          </div>
+        )}
 
-        <button className="btn-ghost" style={{ width:"100%",marginTop:4 }} onClick={onClose}>Cerrar</button>
+        <button className="btn-ghost" style={{ width:"100%",marginTop:16 }} onClick={onClose}>Cerrar</button>
       </div>
     </div>
   );
