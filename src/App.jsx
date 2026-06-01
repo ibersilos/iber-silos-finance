@@ -1371,7 +1371,7 @@ export default function IberSilosApp() {
           </div>
         </aside>
 
-        <div style={{ flex:1, overflowY:"auto", padding:24, scrollBehavior:"smooth" }}>
+        <div style={{ flex:1, overflow:"auto", padding:24, scrollBehavior:"smooth" }}>
           {tab==="dashboard" && <DashboardTab data={data} metrics={metrics} forecast={forecast} ejercicio={ejercicio} EJERCICIOS={EJERCICIOS} bimModal={bimModal} setBimModal={setBimModal} aeatModal={aeatModal} setAeatModal={setAeatModal} exportIvaEsteraCSV={exportIvaEsteraCSV} />}
 
           {tab==="fatture" && (
