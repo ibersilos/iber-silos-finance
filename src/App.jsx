@@ -145,15 +145,16 @@ async function loadData() {
     const res = localStorage.getItem(STORAGE_KEY);
     if (res) {
       const d = JSON.parse(res);
-      if (!d.asientos)       d.asientos       = [];
-      if (!d.fixedAssets)    d.fixedAssets    = DEFAULT_ASSETS;
-      if (!d.ibkrPositions)  d.ibkrPositions  = [];
+      if (!d.asientos)          d.asientos          = [];
+      if (!d.fixedAssets)       d.fixedAssets       = DEFAULT_ASSETS;
+      if (!d.ibkrPositions)     d.ibkrPositions     = [];
+      if (!d.ivaEsteraStatus)   d.ivaEsteraStatus   = {};
       // Migration: aggiunge campi IVA estera a tutte le fatture ricevute esistenti
       if (d.invoices) d.invoices = d.invoices.map(migrateInvoice);
       return d;
     }
   } catch {}
-  return { invoices: [], movements: [], ibkrPositions: [], asientos: [], fixedAssets: DEFAULT_ASSETS };
+  return { invoices: [], movements: [], ibkrPositions: [], asientos: [], fixedAssets: DEFAULT_ASSETS, ivaEsteraStatus: {} };
 }
 function saveData(data, onError) {
   try { localStorage.setItem(STORAGE_KEY, JSON.stringify(data)); }
@@ -613,13 +614,343 @@ function LoginScreen({ onLogin }) {
   );
 }
 
+// ── IVA ESTERA TAB ────────────────────────────────────────────────────────────
+const PAESI_INFO = [
+  { code:"IT", flag:"🇮🇹", label:"Italia",   aliquota:0.22, portale:"Portale VIES + Agenzia Entrate IT", scadenza:"30/09 anno succ.", normativa:"Dir. 2008/9/CE" },
+  { code:"FR", flag:"🇫🇷", label:"Francia",  aliquota:0.20, portale:"impots.gouv.fr — Service des impôts", scadenza:"30/09 anno succ.", normativa:"Dir. 2008/9/CE" },
+  { code:"DE", flag:"🇩🇪", label:"Germania", aliquota:0.19, portale:"BZSt Online-Portal (BOP)", scadenza:"30/09 anno succ.", normativa:"Dir. 2008/9/CE" },
+  { code:"AT", flag:"🇦🇹", label:"Austria",  aliquota:0.20, portale:"FinanzOnline Austria", scadenza:"30/09 anno succ.", normativa:"Dir. 2008/9/CE" },
+  { code:"BE", flag:"🇧🇪", label:"Belgio",   aliquota:0.21, portale:"MyMinfin — SPF Finances", scadenza:"30/09 anno succ.", normativa:"Dir. 2008/9/CE" },
+];
+const IVA_STATUS_OPTS = [
+  { id:"pending",  label:"Da avviare",   color:"#999",    bg:"#F5F5F5" },
+  { id:"open",     label:"Pratica aperta", color:"#b8860b", bg:"#fffde7" },
+  { id:"sent",     label:"Inviata",      color:"#3949ab", bg:"#e8eaf6" },
+  { id:"received", label:"Ricevuta ✓",   color:"#28a745", bg:"#e8f5e9" },
+];
+
+function IvaEsteraTab({ data, persist, ejercicio, EJERCICIOS, exportIvaEsteraCSV }) {
+  const ej   = EJERCICIOS.find(e=>e.id===ejercicio) || EJERCICIOS[1];
+  const anno = ej.from.slice(0,4);
+  const [selectedPaese, setSelectedPaese] = useState(null);
+  const [statusModal, setStatusModal] = useState(null); // { paese, ej }
+  const [filterPaese, setFilterPaese] = useState("ALL");
+
+  const trimestri = [
+    { id:"T1", mesi:[1,2,3], label:"T1 Gen–Mar", scad:`30/04/${anno}` },
+    { id:"T2", mesi:[4,5,6], label:"T2 Apr–Giu", scad:`31/07/${anno}` },
+    { id:"T3", mesi:[7,8,9], label:"T3 Lug–Set", scad:`31/10/${anno}` },
+    { id:"T4", mesi:[10,11,12], label:"T4 Ott–Dic", scad:`31/01/${parseInt(anno)+1}` },
+  ];
+
+  // Calcolo IVA per paese e trimestre
+  const calc = useMemo(() => {
+    const byPaese = {};
+    const byTrim  = {};
+    PAESI_INFO.forEach(p => { byPaese[p.code] = { tot:0, fatture:[] }; });
+    trimestri.forEach(t => { byTrim[t.id] = { tot:0, ...Object.fromEntries(PAESI_INFO.map(p=>[p.code,0])) }; });
+
+    data.invoices.forEach(inv => {
+      if (inv.type !== "ricevuta") return;
+      const d = inv.fechaOperacion || inv.date || "";
+      if (!d || d < ej.from || d > ej.to) return;
+      const p = inv.paisIvaOrigen;
+      if (!p || p === "ES" || !byPaese[p]) return;
+      const iva = parseFloat(inv.ivaEsteraAmount) || 0;
+      if (iva <= 0) return;
+      const mo = parseInt(d.slice(5,7));
+      const t  = mo<=3?"T1":mo<=6?"T2":mo<=9?"T3":"T4";
+      byPaese[p].tot += iva;
+      byPaese[p].fatture.push({ ...inv, _trim:t });
+      byTrim[t][p] += iva;
+      byTrim[t].tot += iva;
+    });
+    const totale = Object.values(byPaese).reduce((s,p)=>s+p.tot,0);
+    return { byPaese, byTrim, totale };
+  }, [data.invoices, ejercicio]);
+
+  const getStatus = (paese) => {
+    const key = `${ej.id}_${paese}`;
+    return data.ivaEsteraStatus?.[key] || { stato:"pending", dataInvio:"", importoRicevuto:"", note:"" };
+  };
+
+  const saveStatus = (paese, updates) => {
+    const key = `${ej.id}_${paese}`;
+    const current = getStatus(paese);
+    persist({ ...data, ivaEsteraStatus: { ...(data.ivaEsteraStatus||{}), [key]: { ...current, ...updates } } });
+    setStatusModal(null);
+  };
+
+  // Fatture filtrate per la tabella in basso
+  const fattureVisibili = useMemo(() => {
+    let list = data.invoices.filter(inv => {
+      if (inv.type !== "ricevuta") return false;
+      const d = inv.fechaOperacion || inv.date || "";
+      if (!d || d < ej.from || d > ej.to) return false;
+      if (!inv.paisIvaOrigen || inv.paisIvaOrigen === "ES") return false;
+      if (!(parseFloat(inv.ivaEsteraAmount) > 0)) return false;
+      if (filterPaese !== "ALL" && inv.paisIvaOrigen !== filterPaese) return false;
+      return true;
+    });
+    return list.sort((a,b)=>(b.date||"").localeCompare(a.date||""));
+  }, [data.invoices, ejercicio, filterPaese]);
+
+  const fmtN = v => new Intl.NumberFormat("es-ES",{style:"currency",currency:"EUR",minimumFractionDigits:2}).format(v||0);
+
+  return (
+    <div>
+      {/* Header */}
+      <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20 }}>
+        <div className="section-title">Recupero IVA Estera — Dir. 2008/9/CE</div>
+        <div style={{ fontSize:11,color:"#999",fontFamily:"'IBM Plex Mono',monospace" }}>
+          Soglia annuale: <strong style={{color:"#1A1A1A"}}>€{IVA_ESTERA_SOGLIA_ANNUA}</strong> · Soglia trimestrale: <strong style={{color:"#1A1A1A"}}>€{IVA_ESTERA_SOGLIA_TRIM}</strong>
+        </div>
+      </div>
+
+      {/* KPI totale */}
+      <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:14,marginBottom:20 }}>
+        <div className="kpi-card" style={{ borderLeftColor:"#F5C800" }}>
+          <div className="kpi-label">Totale recuperabile {anno}</div>
+          <div className="kpi-value" style={{ color: calc.totale>=IVA_ESTERA_SOGLIA_ANNUA?"#28a745":"#b8860b" }}>{fmtN(calc.totale)}</div>
+          <div style={{ fontSize:10,color:"#bbb",marginTop:4 }}>
+            {calc.totale>=IVA_ESTERA_SOGLIA_ANNUA ? "✓ Soglia annuale superata" : `⚠ Mancano €${(IVA_ESTERA_SOGLIA_ANNUA-calc.totale).toFixed(2)} alla soglia`}
+          </div>
+        </div>
+        <div className="kpi-card" style={{ borderLeftColor:"#3949ab" }}>
+          <div className="kpi-label">Paesi attivi</div>
+          <div className="kpi-value" style={{ color:"#3949ab" }}>{PAESI_INFO.filter(p=>calc.byPaese[p.code].tot>0).length}</div>
+          <div style={{ fontSize:10,color:"#bbb",marginTop:4 }}>{PAESI_INFO.filter(p=>calc.byPaese[p.code].tot>0).map(p=>p.flag).join(" ")}</div>
+        </div>
+        <div className="kpi-card" style={{ borderLeftColor:"#28a745" }}>
+          <div className="kpi-label">Fatture con IVA estera</div>
+          <div className="kpi-value" style={{ color:"#28a745" }}>{fattureVisibili.length}</div>
+          <div style={{ fontSize:10,color:"#bbb",marginTop:4 }}>Scad. annuale: 30/09/{parseInt(anno)+1}</div>
+        </div>
+      </div>
+
+      {/* Cards per paese */}
+      <div style={{ display:"grid",gridTemplateColumns:"repeat(5,1fr)",gap:12,marginBottom:20 }}>
+        {PAESI_INFO.map(paese => {
+          const totPaese = calc.byPaese[paese.code].tot;
+          const status   = getStatus(paese.code);
+          const stOpt    = IVA_STATUS_OPTS.find(s=>s.id===status.stato) || IVA_STATUS_OPTS[0];
+          const okTrim   = totPaese >= IVA_ESTERA_SOGLIA_TRIM;
+          const okAnnuo  = totPaese >= IVA_ESTERA_SOGLIA_ANNUA;
+          return (
+            <div key={paese.code}
+              onClick={() => setSelectedPaese(selectedPaese===paese.code ? null : paese.code)}
+              style={{
+                background:"white", borderRadius:10, padding:"14px 14px 12px",
+                border:`2px solid ${selectedPaese===paese.code?"#E30613":"#EBEBEB"}`,
+                cursor:"pointer", transition:"all 0.15s",
+                boxShadow: selectedPaese===paese.code?"0 4px 16px rgba(227,6,19,0.12)":"0 1px 4px rgba(0,0,0,0.05)"
+              }}>
+              <div style={{ fontSize:22,marginBottom:6 }}>{paese.flag}</div>
+              <div style={{ fontWeight:800,fontSize:13,marginBottom:2 }}>{paese.label}</div>
+              <div style={{ fontFamily:"'IBM Plex Mono',monospace",fontWeight:700,fontSize:16,
+                color:totPaese>0?(okAnnuo?"#28a745":"#b8860b"):"#ccc",marginBottom:8 }}>
+                {totPaese>0 ? fmtN(totPaese) : "—"}
+              </div>
+              <div style={{ marginBottom:8 }}>
+                <span style={{ fontSize:9,fontWeight:700,padding:"2px 7px",borderRadius:10,
+                  background:stOpt.bg, color:stOpt.color, letterSpacing:"0.05em" }}>
+                  {stOpt.label}
+                </span>
+              </div>
+              {totPaese > 0 && (
+                <div style={{ fontSize:9,color:"#bbb",lineHeight:1.4 }}>
+                  {okTrim ? <span style={{color:"#3949ab"}}>✓ &gt;€{IVA_ESTERA_SOGLIA_TRIM} trim.</span> : <span>⚠ &lt;€{IVA_ESTERA_SOGLIA_TRIM} trim.</span>}<br/>
+                  {okAnnuo ? <span style={{color:"#28a745"}}>✓ &gt;€{IVA_ESTERA_SOGLIA_ANNUA} annuo</span> : <span>Annuo: {fmtN(totPaese)}</span>}
+                </div>
+              )}
+              {totPaese > 0 && (
+                <button className="btn-ghost" style={{ fontSize:9,padding:"3px 8px",marginTop:8,width:"100%" }}
+                  onClick={e=>{e.stopPropagation();setStatusModal({paese:paese.code, status});}}>
+                  Aggiorna stato
+                </button>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Tabella trimestrale */}
+      <div className="card" style={{ marginBottom:20 }}>
+        <div style={{ fontSize:10,fontWeight:700,letterSpacing:"1.5px",textTransform:"uppercase",color:"#bbb",marginBottom:14 }}>
+          Dettaglio trimestrale {anno}
+        </div>
+        <table>
+          <thead>
+            <tr>
+              <th>Trimestre</th>
+              <th>Scadenza</th>
+              {PAESI_INFO.map(p=><th key={p.code} style={{textAlign:"right"}}>{p.flag} {p.code}</th>)}
+              <th style={{textAlign:"right"}}>Totale</th>
+              <th style={{textAlign:"center"}}>Export</th>
+            </tr>
+          </thead>
+          <tbody>
+            {trimestri.map(t => {
+              const row = calc.byTrim[t.id];
+              const okTrimTot = row.tot >= IVA_ESTERA_SOGLIA_TRIM;
+              return (
+                <tr key={t.id}>
+                  <td style={{fontWeight:700}}>{t.label}</td>
+                  <td style={{fontSize:11,color:"#999",fontFamily:"'IBM Plex Mono',monospace"}}>{t.scad}</td>
+                  {PAESI_INFO.map(p=>(
+                    <td key={p.code} style={{textAlign:"right",fontFamily:"'IBM Plex Mono',monospace",
+                      color:row[p.code]>0?"#1A1A1A":"#ddd",fontWeight:row[p.code]>0?600:400}}>
+                      {row[p.code]>0 ? fmtN(row[p.code]) : "—"}
+                    </td>
+                  ))}
+                  <td style={{textAlign:"right",fontFamily:"'IBM Plex Mono',monospace",fontWeight:800,
+                    color:row.tot>0?(okTrimTot?"#28a745":"#b8860b"):"#ddd"}}>
+                    {row.tot>0 ? fmtN(row.tot) : "—"}
+                  </td>
+                  <td style={{textAlign:"center"}}>
+                    {row.tot>0
+                      ? <button className="btn-ghost" style={{fontSize:10,padding:"3px 10px"}}
+                          onClick={()=>exportIvaEsteraCSV(t.id)}>
+                          ↓ CSV
+                        </button>
+                      : <span style={{color:"#ddd",fontSize:11}}>—</span>
+                    }
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+          <tfoot>
+            <tr style={{background:"#FAFAFA"}}>
+              <td colSpan={2} style={{fontWeight:800,fontSize:12,textTransform:"uppercase",letterSpacing:"0.5px"}}>Totale {anno}</td>
+              {PAESI_INFO.map(p=>(
+                <td key={p.code} style={{textAlign:"right",fontFamily:"'IBM Plex Mono',monospace",fontWeight:800,
+                  color:calc.byPaese[p.code].tot>0?"#1A1A1A":"#ddd"}}>
+                  {calc.byPaese[p.code].tot>0 ? fmtN(calc.byPaese[p.code].tot) : "—"}
+                </td>
+              ))}
+              <td style={{textAlign:"right",fontFamily:"'IBM Plex Mono',monospace",fontWeight:900,
+                color:calc.totale>=IVA_ESTERA_SOGLIA_ANNUA?"#28a745":"#b8860b",fontSize:15}}>
+                {fmtN(calc.totale)}
+              </td>
+              <td/>
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+
+      {/* Filtro + Lista fatture */}
+      <div className="card">
+        <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14 }}>
+          <div style={{ fontSize:10,fontWeight:700,letterSpacing:"1.5px",textTransform:"uppercase",color:"#bbb" }}>
+            Fatture con IVA estera — {anno}
+          </div>
+          <div style={{ display:"flex",gap:6,alignItems:"center" }}>
+            <span style={{ fontSize:11,color:"#999" }}>Paese:</span>
+            {["ALL",...PAESI_INFO.map(p=>p.code)].map(code=>(
+              <button key={code} onClick={()=>setFilterPaese(code)}
+                style={{ fontSize:10,padding:"3px 10px",borderRadius:20,border:"1.5px solid",cursor:"pointer",
+                  fontWeight:700,transition:"all 0.15s",
+                  background:filterPaese===code?"#E30613":"white",
+                  color:filterPaese===code?"white":"#666",
+                  borderColor:filterPaese===code?"#E30613":"#E0E0E0" }}>
+                {code==="ALL" ? "Tutti" : (PAESI_INFO.find(p=>p.code===code)?.flag+" "+code)}
+              </button>
+            ))}
+          </div>
+        </div>
+        {fattureVisibili.length===0
+          ? <div style={{color:"#bbb",fontSize:13,padding:"20px 0",textAlign:"center"}}>
+              Nessuna fattura con IVA estera in {anno}
+              {filterPaese!=="ALL" && ` per ${filterPaese}`}.
+            </div>
+          : <table>
+              <thead><tr>
+                <th>N° Fattura</th><th>Data</th><th>Fornitore</th><th>Paese</th>
+                <th style={{textAlign:"right"}}>Base Impon.</th>
+                <th style={{textAlign:"right"}}>Aliquota</th>
+                <th style={{textAlign:"right"}}>IVA Recuperabile</th>
+                <th>Trim.</th>
+              </tr></thead>
+              <tbody>
+                {fattureVisibili.map(inv => {
+                  const mo  = parseInt((inv.fechaOperacion||inv.date||"").slice(5,7));
+                  const tri = mo<=3?"T1":mo<=6?"T2":mo<=9?"T3":"T4";
+                  const pi  = PAESI_INFO.find(p=>p.code===inv.paisIvaOrigen);
+                  return (
+                    <tr key={inv.id}>
+                      <td style={{fontWeight:700,color:"#E30613"}}>{inv.number||"—"}</td>
+                      <td style={{fontSize:11,color:"#999",fontFamily:"'IBM Plex Mono',monospace"}}>{inv.date ? new Date(inv.date).toLocaleDateString("it-IT") : "—"}</td>
+                      <td style={{fontWeight:500}}>{inv.supplier||"—"}</td>
+                      <td>{pi ? `${pi.flag} ${pi.label}` : inv.paisIvaOrigen}</td>
+                      <td style={{textAlign:"right",fontFamily:"'IBM Plex Mono',monospace"}}>{fmtN(inv.ivaEsteraBase)}</td>
+                      <td style={{textAlign:"right",fontFamily:"'IBM Plex Mono',monospace",color:"#666"}}>
+                        {((parseFloat(inv.ivaEsteraRate)||0)*100).toFixed(0)}%
+                      </td>
+                      <td style={{textAlign:"right",fontFamily:"'IBM Plex Mono',monospace",fontWeight:700,color:"#28a745"}}>
+                        {fmtN(inv.ivaEsteraAmount)}
+                      </td>
+                      <td><span style={{fontSize:10,fontWeight:700,padding:"2px 7px",borderRadius:4,
+                        background:"#e8eaf6",color:"#3949ab"}}>{tri}</span></td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+        }
+      </div>
+
+      {/* Modal aggiorna stato pratica */}
+      {statusModal && (() => {
+        const pi = PAESI_INFO.find(p=>p.code===statusModal.paese);
+        const st = statusModal.status;
+        const [form, setForm] = useState({ ...st });
+        const set = (k,v) => setForm(f=>({...f,[k]:v}));
+        return (
+          <div className="modal-overlay" onClick={()=>setStatusModal(null)}>
+            <div className="modal" style={{maxWidth:420}} onClick={e=>e.stopPropagation()}>
+              <div style={{display:"flex",justifyContent:"space-between",marginBottom:20}}>
+                <div className="modal-title">{pi?.flag} {pi?.label} — Stato pratica</div>
+                <button onClick={()=>setStatusModal(null)} style={{background:"none",fontSize:20,color:"#999"}}>×</button>
+              </div>
+              <div style={{background:"#FAFAFA",borderRadius:8,padding:"10px 14px",marginBottom:16,fontSize:12,color:"#666"}}>
+                <strong>Portale:</strong> {pi?.portale}<br/>
+                <strong>Scadenza:</strong> {pi?.scadenza} · {pi?.normativa}
+              </div>
+              <div className="form-row">
+                <div>
+                  <label>Stato pratica</label>
+                  <select value={form.stato} onChange={e=>set("stato",e.target.value)}>
+                    {IVA_STATUS_OPTS.map(s=><option key={s.id} value={s.id}>{s.label}</option>)}
+                  </select>
+                </div>
+              </div>
+              <div className="form-row form-row-2">
+                <div><label>Data invio</label><input type="date" value={form.dataInvio||""} onChange={e=>set("dataInvio",e.target.value)} /></div>
+                <div><label>Importo ricevuto (€)</label><input type="number" step="0.01" value={form.importoRicevuto||""} onChange={e=>set("importoRicevuto",e.target.value)} placeholder="0.00" /></div>
+              </div>
+              <div className="form-row">
+                <div><label>Note</label><textarea value={form.note||""} onChange={e=>set("note",e.target.value)} rows={2} placeholder="Note pratica..." /></div>
+              </div>
+              <div style={{display:"flex",gap:10,marginTop:4}}>
+                <button className="btn-ghost" style={{flex:1}} onClick={()=>setStatusModal(null)}>Cancelar</button>
+                <button className="btn-red" style={{flex:1}} onClick={()=>saveStatus(statusModal.paese,form)}>Guardar</button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+    </div>
+  );
+}
+
 export default function IberSilosApp() {
   const [authenticated, setAuthenticated] = useState(() => {
     const token = sessionStorage.getItem('ibs_auth');
     return !!token && Object.values(USERS).includes(token);
   });
   const [tab, setTab] = useState("dashboard");
-  const [data, setData] = useState({ invoices: [], movements: [], ibkrPositions: [], asientos: [], fixedAssets: DEFAULT_ASSETS });
+  const [data, setData] = useState({ invoices: [], movements: [], ibkrPositions: [], asientos: [], fixedAssets: DEFAULT_ASSETS, ivaEsteraStatus: {} });
   const [loading, setLoading] = useState(true);
   const [toast, setToast] = useState(null);
   const [confirmModal, setConfirmModal] = useState(null); // { message, onConfirm }
@@ -903,6 +1234,7 @@ export default function IberSilosApp() {
     { id:"forecast",     label:"Forecast",     icon: <svg viewBox="0 0 24 24" width={16} height={16} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/></svg> },
     { id:"ibkr",         label:"IBKR SL",      icon: <svg viewBox="0 0 24 24" width={16} height={16} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg> },
     { id:"contabilidad", label:"Contabilidad", icon: <svg viewBox="0 0 24 24" width={16} height={16} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg> },
+    { id:"iva_estera",   label:"IVA Estera",   icon: <svg viewBox="0 0 24 24" width={16} height={16} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg> },
   ];
 
   return (
@@ -1130,6 +1462,7 @@ export default function IberSilosApp() {
 
           {tab==="ibkr" && <IbkrTab data={data} setIbkrModal={setIbkrModal} deleteIbkr={deleteIbkr} />}
           {tab==="contabilidad" && <ContabilidadTab data={data} persist={persist} contabView={contabView} setContabView={setContabView} mayorCuenta={mayorCuenta} setMayorCuenta={setMayorCuenta} setAsientoModal={setAsientoModal} deleteAsiento={deleteAsiento} exportContabCSV={exportContabCSV} />}
+          {tab==="iva_estera" && <IvaEsteraTab data={data} persist={persist} ejercicio={ejercicio} EJERCICIOS={EJERCICIOS} exportIvaEsteraCSV={exportIvaEsteraCSV} />}
         </div>
       </div>
 
