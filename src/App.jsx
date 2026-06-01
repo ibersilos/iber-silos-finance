@@ -588,7 +588,7 @@ function LoginScreen({ onLogin }) {
       <div style={{ position:'fixed', top:4, left:0, right:0, height:4, background:'#E30613' }} />
       <div style={{ width:360, maxWidth:'96vw', background:'white', borderRadius:12, boxShadow:'0 4px 32px rgba(0,0,0,0.10)', border:'1px solid #ebebeb', overflow:'hidden' }}>
         <div style={{ background:'white', padding:'36px 32px 24px', textAlign:'center', borderBottom:'1px solid #f0f0f0' }}>
-          <img src="/iber-silos-finance/logo.png" alt="Ibersilos" style={{ height:80, width:'auto', display:'block', margin:'0 auto 12px' }} />
+          <img src="/iber-silos-finance/logo.png" alt="Ibersilos" style={{ height:110, width:'auto', display:'block', margin:'0 auto 16px' }} />
           <p style={{ color:'#aaa', fontSize:11, margin:0, letterSpacing:'0.8px', textTransform:'uppercase', fontFamily:"'DM Sans','Segoe UI',sans-serif" }}>Gestión Financiera · Reus, Tarragona</p>
         </div>
         <div style={{ padding:'28px 32px' }}>
