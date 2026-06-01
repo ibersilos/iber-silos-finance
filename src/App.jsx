@@ -955,6 +955,7 @@ export default function IberSilosApp() {
   const [ibkrModal, setIbkrModal] = useState(null);
   const [ibkrPrices, setIbkrPrices] = useState({});
   const [ibkrPricesTs, setIbkrPricesTs] = useState(null);
+  const [ibkrPricesErr, setIbkrPricesErr] = useState(null);
   const [asientoModal, setAsientoModal] = useState(null);
   const [contabView, setContabView] = useState("diario");
   const [mayorCuenta, setMayorCuenta] = useState("572");
@@ -1016,21 +1017,29 @@ export default function IberSilosApp() {
   const deleteMov = (id) => setConfirmModal({ message:"Se eliminará el movimiento.", onConfirm: () => { persist({ ...data, movements: data.movements.filter(m => m.id !== id) }); showToast("Movimiento eliminado", "warn"); setConfirmModal(null); } });
 
   const fetchIbkrPrices = useCallback(async () => {
-    const symbols = Object.values(IBKR_YAHOO).join(",");
+    setIbkrPricesErr(null);
     try {
-      const url = `https://query1.finance.yahoo.com/v7/finance/quote?symbols=${symbols}&fields=regularMarketPrice`;
-      const proxy = `https://corsproxy.io/?url=${encodeURIComponent(url)}`;
-      const res = await fetch(proxy);
-      if (!res.ok) throw new Error("fetch error");
-      const json = await res.json();
-      const quotes = json?.quoteResponse?.result || [];
-      const map = {};
-      quotes.forEach(q => {
-        const ticker = Object.entries(IBKR_YAHOO).find(([,v]) => v === q.symbol)?.[0];
-        if (ticker && q.regularMarketPrice) map[ticker] = q.regularMarketPrice;
-      });
-      if (Object.keys(map).length > 0) { setIbkrPrices(map); setIbkrPricesTs(new Date()); }
-    } catch { /* silently fail — user sees stale/no prices */ }
+      const results = await Promise.all(
+        Object.entries(IBKR_YAHOO).map(async ([ticker, symbol]) => {
+          const url = `https://query1.finance.yahoo.com/v8/finance/chart/${symbol}?interval=1d&range=1d`;
+          const proxy = `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`;
+          const res = await fetch(proxy, { signal: AbortSignal.timeout(8000) });
+          if (!res.ok) return null;
+          const json = await res.json();
+          const price = json?.chart?.result?.[0]?.meta?.regularMarketPrice;
+          return price ? [ticker, parseFloat(price.toFixed(4))] : null;
+        })
+      );
+      const map = Object.fromEntries(results.filter(Boolean));
+      if (Object.keys(map).length > 0) {
+        setIbkrPrices(map);
+        setIbkrPricesTs(new Date());
+      } else {
+        setIbkrPricesErr("Nessun prezzo ricevuto. Mercato chiuso o servizio non disponibile.");
+      }
+    } catch (e) {
+      setIbkrPricesErr("Errore connessione: " + (e.message || "timeout"));
+    }
   }, []);
 
   useEffect(() => { if (tab === "ibkr") fetchIbkrPrices(); }, [tab, fetchIbkrPrices]);
@@ -1476,7 +1485,7 @@ export default function IberSilosApp() {
             </div>
           )}
 
-          {tab==="ibkr" && <IbkrTab data={data} setIbkrModal={setIbkrModal} deleteIbkr={deleteIbkr} ibkrPrices={ibkrPrices} ibkrPricesTs={ibkrPricesTs} fetchIbkrPrices={fetchIbkrPrices} />}
+          {tab==="ibkr" && <IbkrTab data={data} setIbkrModal={setIbkrModal} deleteIbkr={deleteIbkr} ibkrPrices={ibkrPrices} ibkrPricesTs={ibkrPricesTs} ibkrPricesErr={ibkrPricesErr} fetchIbkrPrices={fetchIbkrPrices} />}
           {tab==="contabilidad" && <ContabilidadTab data={data} persist={persist} contabView={contabView} setContabView={setContabView} mayorCuenta={mayorCuenta} setMayorCuenta={setMayorCuenta} setAsientoModal={setAsientoModal} deleteAsiento={deleteAsiento} exportContabCSV={exportContabCSV} />}
           {tab==="iva_estera" && <IvaEsteraTab data={data} persist={persist} ejercicio={ejercicio} EJERCICIOS={EJERCICIOS} exportIvaEsteraCSV={exportIvaEsteraCSV} />}
         </div>
@@ -2201,7 +2210,7 @@ function IvaModal({ data, metrics, ejercicio, EJERCICIOS, exportIvaEsteraCSV, on
 }
 
 
-function IbkrTab({ data, setIbkrModal, deleteIbkr, ibkrPrices, ibkrPricesTs, fetchIbkrPrices }) {
+function IbkrTab({ data, setIbkrModal, deleteIbkr, ibkrPrices, ibkrPricesTs, ibkrPricesErr, fetchIbkrPrices }) {
   const [refreshing, setRefreshing] = useState(false);
   const positions = data.ibkrPositions || [];
   const byTicker = {};
@@ -2229,7 +2238,8 @@ function IbkrTab({ data, setIbkrModal, deleteIbkr, ibkrPrices, ibkrPricesTs, fet
       <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20 }}>
         <div>
           <div className="section-title">IBKR SL — Portfolio Iber-Silos SLU</div>
-          {ibkrPricesTs && <div style={{ fontSize:10,color:"#bbb",marginTop:2 }}>Prezzi aggiornati: {ibkrPricesTs.toLocaleTimeString("it-IT")}</div>}
+          {ibkrPricesTs && !ibkrPricesErr && <div style={{ fontSize:10,color:"#28a745",marginTop:2 }}>✓ Prezzi aggiornati: {ibkrPricesTs.toLocaleTimeString("it-IT")}</div>}
+          {ibkrPricesErr && <div style={{ fontSize:11,color:"#E30613",marginTop:2,fontWeight:600 }}>⚠ {ibkrPricesErr}</div>}
         </div>
         <div style={{ display:"flex",gap:8 }}>
           <button className="btn-ghost" onClick={handleRefresh} disabled={refreshing} style={{ fontSize:12 }}>{refreshing ? "⏳" : "🔄"} Aggiorna prezzi</button>
