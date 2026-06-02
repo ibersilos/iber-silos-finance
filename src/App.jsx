@@ -2533,41 +2533,51 @@ function InvoiceTable({ invoices, onEdit, onDelete }) {
         <span style={{ marginLeft:"auto",color:"#bbb",fontSize:11,fontWeight:600 }}>{filtered.length} fatture</span>
       </div>
       {filtered.length===0 ? <div style={{ color:"#bbb",fontSize:13 }}>Sin facturas.</div> :
-        <div style={{ overflowX:"auto" }}>
-          <table>
-            <thead><tr><th>N°</th><th>Fecha</th><th>Venc.</th><th>Tipo</th><th>Contraparte</th><th>Descripción</th><th style={{ textAlign:"right" }}>Base imp.</th><th>IVA</th><th style={{ textAlign:"right" }}>Total</th><th>Stato</th><th></th></tr></thead>
+        <div style={{ overflowX:"auto", width:"100%" }}>
+          <table style={{ tableLayout:"fixed", width:"100%", minWidth:760 }}>
+            <colgroup>
+              <col style={{ width:70 }}/>  {/* N° */}
+              <col style={{ width:76 }}/>  {/* Fecha */}
+              <col style={{ width:76 }}/>  {/* Venc. */}
+              <col style={{ width:72 }}/>  {/* Tipo */}
+              <col style={{ width:"18%" }}/> {/* Contraparte */}
+              <col style={{ width:"22%" }}/> {/* Descripción */}
+              <col style={{ width:90 }}/>  {/* Base */}
+              <col style={{ width:90 }}/>  {/* IVA */}
+              <col style={{ width:90 }}/>  {/* Total */}
+              <col style={{ width:90 }}/>  {/* Stato */}
+              <col style={{ width:72 }}/>  {/* Azioni */}
+            </colgroup>
+            <thead><tr>
+              <th>N°</th><th>Fecha</th><th>Venc.</th><th>Tipo</th>
+              <th>Contraparte</th><th>Descripción</th>
+              <th style={{ textAlign:"right" }}>Base imp.</th>
+              <th>IVA</th>
+              <th style={{ textAlign:"right" }}>Total</th>
+              <th>Stato</th><th></th>
+            </tr></thead>
             <tbody>{[...filtered].reverse().map(inv=>{
-              // Fix-3: badge ⚠ per fatture ricevute con IVA estera non classificata
-              // Segnala se ivaAmount > 0 (IVA ES generica) ma paisIvaOrigen non è stato
-              // impostato esplicitamente — si applica a tutti i fornitori, non solo lista fissa
               const needsIvaClassification =
                 inv.type === "ricevuta" &&
                 (parseFloat(inv.ivaAmount) > 0) &&
                 (!inv.paisIvaOrigen || inv.paisIvaOrigen === "ES") &&
-                // Escludi fornitori chiaramente spagnoli (IVA ES corretto)
                 !(inv.supplier||"").match(/La Clau|Gestrams|Poligon|Brochette|Ruta|Reconquista|Vegallana|Lacamart|Doyouspain/i);
-
               return (
               <tr key={inv.id} style={{ background: needsIvaClassification ? "#fffde7" : undefined }}>
-                <td style={{ color:"#E30613",fontWeight:700,whiteSpace:"nowrap" }}>
+                <td style={{ color:"#E30613",fontWeight:700,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap" }}>
                   {inv.number||"—"}
-                  {needsIvaClassification && (
-                    <span title="IVA estera da classificare" style={{ marginLeft:5,fontSize:11,cursor:"help" }}>⚠️</span>
-                  )}
+                  {needsIvaClassification && <span title="IVA estera da classificare" style={{ marginLeft:4,fontSize:11,cursor:"help" }}>⚠️</span>}
                 </td>
-                <td style={{ whiteSpace:"nowrap",color:"#999" }}>{fmtDate(inv.date)}</td>
-                <td style={{ whiteSpace:"nowrap",color:inv.dueDate<new Date().toISOString().split("T")[0]&&inv.status==="aperta"?"#E30613":"#999" }}>{fmtDate(inv.dueDate)}</td>
+                <td style={{ whiteSpace:"nowrap",color:"#999",fontSize:12 }}>{fmtDate(inv.date)}</td>
+                <td style={{ whiteSpace:"nowrap",fontSize:12,color:inv.dueDate<new Date().toISOString().split("T")[0]&&inv.status==="aperta"?"#E30613":"#999" }}>{fmtDate(inv.dueDate)}</td>
                 <td><span className={`badge ${inv.type==="emessa"?"badge-green":"badge-yellow"}`}>{inv.type}</span></td>
-                <td style={{ maxWidth:130,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap" }}>{inv.type==="emessa"?inv.client:inv.supplier}</td>
-                <td style={{ maxWidth:160,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",color:"#999",fontSize:12 }}>{inv.description}</td>
-                <td style={{ textAlign:"right",fontWeight:600 }}>{fmt(inv.netAmount)}</td>
-                <td style={{ color:"#bbb",fontSize:11 }}>
-                  {inv.ivaType}
-                  {inv.paisIvaOrigen && inv.paisIvaOrigen!=="ES" && (
-                    <span style={{ marginLeft:4 }}>{IVA_FLAGS[inv.paisIvaOrigen]||""}</span>
-                  )}
+                <td style={{ overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",fontWeight:600,fontSize:12 }}>{inv.type==="emessa"?inv.client:inv.supplier}</td>
+                <td style={{ overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",color:"#999",fontSize:11 }}>{inv.description}</td>
+                <td style={{ textAlign:"right",fontWeight:600,fontFamily:"'IBM Plex Mono',monospace",fontSize:12 }}>{fmt(inv.netAmount)}</td>
+                <td style={{ color:"#bbb",fontSize:11,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap" }}>
+                  {inv.ivaType}{inv.paisIvaOrigen && inv.paisIvaOrigen!=="ES" && <span style={{ marginLeft:3 }}>{IVA_FLAGS[inv.paisIvaOrigen]||""}</span>}
                 </td>
-                <td style={{ textAlign:"right",fontWeight:600 }}>{fmt(inv.grossAmount)}</td>
+                <td style={{ textAlign:"right",fontWeight:700,fontFamily:"'IBM Plex Mono',monospace",fontSize:12 }}>{fmt(inv.grossAmount)}</td>
                 <td><StatusBadge status={inv.status}/></td>
                 <td style={{ whiteSpace:"nowrap" }}>
                   <button className="btn-ghost" style={{ fontSize:11,marginRight:4,padding:"4px 8px" }} onClick={()=>onEdit(inv)}>✏️</button>
