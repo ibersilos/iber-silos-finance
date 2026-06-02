@@ -2200,7 +2200,7 @@ function IbkrTab({ data, setIbkrModal, deleteIbkr, ibkrLive }) {
           const blob = new Blob(["﻿"+csv], { type:"text/csv;charset=utf-8;" });
           const a = document.createElement("a"); a.href = URL.createObjectURL(blob);
           a.download = `IBKR_diario_trading_${today()}.csv`; a.click();
-        }}>↓ Export CSV David</button>
+        }}>↓ Export CSV</button>
       </div>
       <div style={{ display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:14,marginBottom:20 }}>
         <div className="kpi-card"><div className="kpi-label">Totale investito</div><div className="kpi-value" style={{ color:"#E30613" }}>{fmt(totalInvested)}</div></div>
