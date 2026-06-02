@@ -2536,11 +2536,11 @@ function InvoiceTable({ invoices, onEdit, onDelete }) {
         <div style={{ overflowX:"auto", width:"100%" }}>
           <table style={{ tableLayout:"fixed", width:"100%", minWidth:680 }}>
             <colgroup>
-              <col style={{ width:70 }}/>  {/* N° */}
+              <col style={{ width:100 }}/>  {/* N° */}
               <col style={{ width:76 }}/>  {/* Fecha */}
               <col style={{ width:76 }}/>  {/* Venc. */}
               <col style={{ width:72 }}/>  {/* Tipo */}
-              <col style={{ width:"28%" }}/> {/* Contraparte */}
+              <col style={{ width:"20%" }}/> {/* Contraparte */}
               <col style={{ width:100 }}/>  {/* Base */}
               <col style={{ width:"16%" }}/> {/* IVA */}
               <col style={{ width:100 }}/>  {/* Total */}
