@@ -1345,41 +1345,6 @@ export default function IberSilosApp() {
               </button>
             ))}
           </div>
-          <div style={{ padding:"14px 14px 10px", borderTop:"1px solid #F5F5F5", marginTop:"auto" }}>
-            <div style={{ fontSize:9, fontWeight:700, letterSpacing:"1.5px", textTransform:"uppercase", color:"#bbb", marginBottom:10 }}>PAC IBKR SL</div>
-            {(() => {
-              const { byTicker, totalInvested, lastOp, pacTarget, count } = pacSummary;
-              return (
-                <>
-                  <div style={{ background:"#FFF5F5", borderRadius:8, padding:"10px 12px", marginBottom:8 }}>
-                    <div style={{ fontSize:10, color:"#bbb", fontWeight:700, marginBottom:2 }}>TOTAL INVERTIDO</div>
-                    <div style={{ fontSize:18, fontWeight:800, color:"#E30613" }}>{fmt(totalInvested)}</div>
-                  </div>
-                  <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:6, marginBottom:8 }}>
-                    <div style={{ background:"#F5F5F5", borderRadius:6, padding:"7px 8px", textAlign:"center" }}>
-                      <div style={{ fontSize:9, color:"#bbb", fontWeight:700 }}>OBJETIVO/MES</div>
-                      <div style={{ fontSize:13, fontWeight:800, color:"#b8860b" }}>{fmt(pacTarget)}</div>
-                    </div>
-                    <div style={{ background:"#F5F5F5", borderRadius:6, padding:"7px 8px", textAlign:"center" }}>
-                      <div style={{ fontSize:9, color:"#bbb", fontWeight:700 }}>OPERACIONES</div>
-                      <div style={{ fontSize:13, fontWeight:800 }}>{count}</div>
-                    </div>
-                  </div>
-                  {Object.entries(byTicker).filter(([,t])=>t.shares>0.0001).map(([ticker, t]) => (
-                    <div key={ticker} style={{ display:"flex", justifyContent:"space-between", fontSize:11, padding:"3px 0", borderBottom:"1px solid #F5F5F5" }}>
-                      <span style={{ fontWeight:700, color:"#E30613" }}>{ticker}</span>
-                      <span style={{ color:"#666" }}>{t.shares.toFixed(2)} sh</span>
-                    </div>
-                  ))}
-                  {lastOp && (
-                    <div style={{ marginTop:8, fontSize:10, color:"#bbb" }}>
-                      Último: {fmtDate(lastOp.date)} · {fmt(lastOp.totalEur)}
-                    </div>
-                  )}
-                </>
-              );
-            })()}
-          </div>
         </aside>
 
         <div style={{ flex:1, overflow:"auto", padding:24, scrollBehavior:"smooth" }}>
@@ -1465,7 +1430,7 @@ export default function IberSilosApp() {
             </div>
           )}
 
-          {tab==="ibkr" && <IbkrTab data={data} setIbkrModal={setIbkrModal} deleteIbkr={deleteIbkr} updateIbkrPrice={updateIbkrPrice} ibkrLive={ibkrLive} />}
+          {tab==="ibkr" && <IbkrTab data={data} setIbkrModal={setIbkrModal} deleteIbkr={deleteIbkr} ibkrLive={ibkrLive} />}
           {tab==="contabilidad" && <ContabilidadTab data={data} persist={persist} contabView={contabView} setContabView={setContabView} mayorCuenta={mayorCuenta} setMayorCuenta={setMayorCuenta} setAsientoModal={setAsientoModal} deleteAsiento={deleteAsiento} exportContabCSV={exportContabCSV} />}
           {tab==="iva_estera" && <IvaEsteraTab data={data} persist={persist} ejercicio={ejercicio} EJERCICIOS={EJERCICIOS} exportIvaEsteraCSV={exportIvaEsteraCSV} />}
         </div>
@@ -2190,16 +2155,12 @@ function IvaModal({ data, metrics, ejercicio, EJERCICIOS, exportIvaEsteraCSV, on
 }
 
 
-function IbkrTab({ data, setIbkrModal, deleteIbkr, updateIbkrPrice, ibkrLive }) {
+function IbkrTab({ data, setIbkrModal, deleteIbkr, ibkrLive }) {
   const positions = data.ibkrPositions || [];
-  // Prezzi: live dal JSON (aggiornato dalla GitHub Action) oppure manuale da localStorage
+  // Prezzi dal JSON aggiornato dalla GitHub Action
   const ibkrPrices = {};
   (data.ibkrPositions||[]).forEach(p => {
-    if (!ibkrPrices[p.ticker]) {
-      const live = ibkrLive?.[p.ticker]?.price;
-      const manual = data.ibkrPrices?.[p.ticker];
-      ibkrPrices[p.ticker] = live || manual || 0;
-    }
+    if (!ibkrPrices[p.ticker]) ibkrPrices[p.ticker] = ibkrLive?.[p.ticker]?.price || 0;
   });
   const byTicker = {};
   positions.forEach(p => {
@@ -2245,7 +2206,7 @@ function IbkrTab({ data, setIbkrModal, deleteIbkr, updateIbkrPrice, ibkrLive }) 
       <div className="card" style={{ marginBottom:16 }}>
         <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12 }}>
           <div style={{ fontSize:10,fontWeight:700,letterSpacing:"1.5px",textTransform:"uppercase",color:"#bbb" }}>Posiciones abiertas</div>
-          <div style={{ fontSize:10,color:"#bbb" }}>✏️ Inserisci prezzi correnti da estratto IBKR</div>
+          <div style={{ fontSize:10,color:"#bbb" }}>Aggiornamento automatico ore 18:30 lun-ven</div>
         </div>
         {tickers.length===0 ? <div style={{ color:"#bbb",fontSize:13 }}>Sin posiciones.</div> :
           <table><thead><tr>
@@ -2271,15 +2232,8 @@ function IbkrTab({ data, setIbkrModal, deleteIbkr, updateIbkrPrice, ibkrLive }) 
                 <td style={{ fontWeight:800,color:"#E30613",fontSize:15 }}>{t.ticker}</td>
                 <td style={{ textAlign:"right" }}>{t.shares.toFixed(4)}</td>
                 <td style={{ textAlign:"right",color:"#999" }}>{fmt(pmc)}</td>
-                <td style={{ textAlign:"right" }}>
-                  {ibkrLive?.[t.ticker]?.price
-                    ? <span style={{ fontFamily:"'IBM Plex Mono',monospace",fontWeight:700,fontSize:13,color:"#1A1A1A" }}>{fmt(ibkrLive[t.ticker].price)}</span>
-                    : <input type="number" step="0.01" min="0" defaultValue={currentPrice||""} placeholder="0.00"
-                        onBlur={e=>updateIbkrPrice(t.ticker,e.target.value)}
-                        style={{ width:90,textAlign:"right",fontFamily:"'IBM Plex Mono',monospace",fontWeight:700,fontSize:13,
-                          padding:"4px 6px",border:"1.5px solid #E0E0E0",borderRadius:6,
-                          background:currentPrice?"#f0fff4":"#FAFAFA",color:currentPrice?"#28a745":"#999",outline:"none" }}
-                        onFocus={e=>e.target.style.borderColor="#E30613"} />}
+                <td style={{ textAlign:"right",fontFamily:"'IBM Plex Mono',monospace",fontWeight:700,fontSize:13 }}>
+                  {currentPrice ? fmt(currentPrice) : <span style={{color:"#bbb"}}>—</span>}
                 </td>
                 <td style={{ textAlign:"right",fontSize:12 }}>
                   {(() => { const c = ibkrLive?.[t.ticker]?.change_pct; if (c==null) return <span style={{color:"#bbb"}}>—</span>;
