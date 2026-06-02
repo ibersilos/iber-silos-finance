@@ -2189,9 +2189,20 @@ function IbkrTab({ data, setIbkrModal, deleteIbkr, ibkrLive }) {
             ? <div style={{ fontSize:10,color:"#28a745",marginTop:2 }}>✓ Prezzi aggiornati: {new Date(ibkrLive._updated).toLocaleString("it-IT",{day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"})}</div>
             : <div style={{ fontSize:10,color:"#bbb",marginTop:2 }}>Prezzi manuali — aggiornamento automatico 18:30 lun-ven</div>}
         </div>
-        <button className="btn-red" onClick={()=>setIbkrModal({ id:null,ticker:"VWCE",date:today(),type:"acquisto",shares:"",priceEur:"",totalEur:"",fees:"0",notes:"" })}>+ Operazione</button>
+        <button className="btn-ghost" style={{ fontSize:12 }} onClick={() => {
+          const rows = [["Data","Tipo","Ticker","Shares","Prezzo (€)","Commissioni (€)","Totale (€)","Note"]];
+          [...positions].sort((a,b)=>a.date.localeCompare(b.date)).forEach(p => {
+            rows.push([p.date, p.type==="acquisto"?"Acquisto":"Vendita", p.ticker,
+              parseFloat(p.shares||0).toFixed(4), parseFloat(p.priceEur||0).toFixed(2),
+              parseFloat(p.fees||0).toFixed(2), parseFloat(p.totalEur||0).toFixed(2), p.notes||""]);
+          });
+          const csv = rows.map(r => r.map(v => `"${String(v).replace(/"/g,'""')}"`).join(";")).join("\n");
+          const blob = new Blob(["﻿"+csv], { type:"text/csv;charset=utf-8;" });
+          const a = document.createElement("a"); a.href = URL.createObjectURL(blob);
+          a.download = `IBKR_diario_trading_${today()}.csv`; a.click();
+        }}>↓ Export CSV David</button>
       </div>
-      <div style={{ display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:14,marginBottom:20 }}>
+      <div style={{ display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:14,marginBottom:20 }}>
         <div className="kpi-card"><div className="kpi-label">Totale investito</div><div className="kpi-value" style={{ color:"#E30613" }}>{fmt(totalInvested)}</div></div>
         <div className="kpi-card blue"><div className="kpi-label">Valore corrente</div><div className="kpi-value" style={{ color:"#3949ab" }}>{hasPrices ? fmt(totalCurrentValue) : "—"}</div></div>
         <div className="kpi-card" style={{ background:totalPL===null?"#FAFAFA":totalPL>=0?"#f0fff4":"#fff5f5" }}>
@@ -2201,7 +2212,6 @@ function IbkrTab({ data, setIbkrModal, deleteIbkr, ibkrLive }) {
           </div>
           {totalPLperc!==null && <div style={{ fontSize:11,color:totalPL>=0?"#28a745":"#E30613",marginTop:2 }}>{totalPL>=0?"+":""}{totalPLperc.toFixed(2)}%</div>}
         </div>
-        <div className="kpi-card yellow"><div className="kpi-label">PAC target/mese</div><div className="kpi-value" style={{ color:"#b8860b" }}>{fmt(getPacAmount(today()))}</div><div style={{ fontSize:10,color:"#bbb",marginTop:2 }}>→ €500 desde jul 2026</div></div>
       </div>
       <div className="card" style={{ marginBottom:16 }}>
         <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12 }}>
