@@ -2534,23 +2534,22 @@ function InvoiceTable({ invoices, onEdit, onDelete }) {
       </div>
       {filtered.length===0 ? <div style={{ color:"#bbb",fontSize:13 }}>Sin facturas.</div> :
         <div style={{ overflowX:"auto", width:"100%" }}>
-          <table style={{ tableLayout:"fixed", width:"100%", minWidth:760 }}>
+          <table style={{ tableLayout:"fixed", width:"100%", minWidth:680 }}>
             <colgroup>
               <col style={{ width:70 }}/>  {/* N° */}
               <col style={{ width:76 }}/>  {/* Fecha */}
               <col style={{ width:76 }}/>  {/* Venc. */}
               <col style={{ width:72 }}/>  {/* Tipo */}
-              <col style={{ width:"18%" }}/> {/* Contraparte */}
-              <col style={{ width:"22%" }}/> {/* Descripción */}
-              <col style={{ width:90 }}/>  {/* Base */}
-              <col style={{ width:90 }}/>  {/* IVA */}
-              <col style={{ width:90 }}/>  {/* Total */}
+              <col style={{ width:"28%" }}/> {/* Contraparte */}
+              <col style={{ width:100 }}/>  {/* Base */}
+              <col style={{ width:"16%" }}/> {/* IVA */}
+              <col style={{ width:100 }}/>  {/* Total */}
               <col style={{ width:90 }}/>  {/* Stato */}
               <col style={{ width:72 }}/>  {/* Azioni */}
             </colgroup>
             <thead><tr>
               <th>N°</th><th>Fecha</th><th>Venc.</th><th>Tipo</th>
-              <th>Contraparte</th><th>Descripción</th>
+              <th>Contraparte</th>
               <th style={{ textAlign:"right" }}>Base imp.</th>
               <th>IVA</th>
               <th style={{ textAlign:"right" }}>Total</th>
@@ -2572,7 +2571,6 @@ function InvoiceTable({ invoices, onEdit, onDelete }) {
                 <td style={{ whiteSpace:"nowrap",fontSize:12,color:inv.dueDate<new Date().toISOString().split("T")[0]&&inv.status==="aperta"?"#E30613":"#999" }}>{fmtDate(inv.dueDate)}</td>
                 <td><span className={`badge ${inv.type==="emessa"?"badge-green":"badge-yellow"}`}>{inv.type}</span></td>
                 <td style={{ overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",fontWeight:600,fontSize:12 }}>{inv.type==="emessa"?inv.client:inv.supplier}</td>
-                <td style={{ overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",color:"#999",fontSize:11 }}>{inv.description}</td>
                 <td style={{ textAlign:"right",fontWeight:600,fontFamily:"'IBM Plex Mono',monospace",fontSize:12 }}>{fmt(inv.netAmount)}</td>
                 <td style={{ color:"#bbb",fontSize:11,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap" }}>
                   {inv.ivaType}{inv.paisIvaOrigen && inv.paisIvaOrigen!=="ES" && <span style={{ marginLeft:3 }}>{IVA_FLAGS[inv.paisIvaOrigen]||""}</span>}
