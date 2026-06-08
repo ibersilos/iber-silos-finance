@@ -150,12 +150,13 @@ async function loadData() {
       if (!d.ibkrPositions)     d.ibkrPositions     = [];
       if (!d.ibkrPrices)        d.ibkrPrices        = {};
       if (!d.ivaEsteraStatus)   d.ivaEsteraStatus   = {};
+      if (!d.acciseStatus)      d.acciseStatus      = {};
       // Migration: aggiunge campi IVA estera a tutte le fatture ricevute esistenti
       if (d.invoices) d.invoices = d.invoices.map(migrateInvoice);
       return d;
     }
   } catch {}
-  return { invoices: [], movements: [], ibkrPositions: [], ibkrPrices: {}, asientos: [], fixedAssets: DEFAULT_ASSETS, ivaEsteraStatus: {} };
+  return { invoices: [], movements: [], ibkrPositions: [], ibkrPrices: {}, asientos: [], fixedAssets: DEFAULT_ASSETS, ivaEsteraStatus: {}, acciseStatus: {} };
 }
 function saveData(data, onError) {
   try { localStorage.setItem(STORAGE_KEY, JSON.stringify(data)); }
@@ -939,6 +940,294 @@ function IvaEsteraTab({ data, persist, ejercicio, EJERCICIOS, exportIvaEsteraCSV
   );
 }
 
+// ── ACCISE GASOLIO TAB ────────────────────────────────────────────────────────
+const ACCISE_STATUS_OPTS = [
+  { id:"pending",                             label:"Da avviare",        color:"#999",    bg:"#F5F5F5" },
+  { id:"en_curso_pendiente_cierre_junio",     label:"In corso — giu.",   color:"#b8860b", bg:"#fffde7" },
+  { id:"en_curso_pendiente_cierre_semestre",  label:"In corso — sem.",   color:"#b8860b", bg:"#fffde7" },
+  { id:"pendiente_activacion_LaClau",         label:"Pend. attivazione", color:"#e65100", bg:"#fff3e0" },
+  { id:"pendiente_datos_DKV",                 label:"Pend. dati DKV",    color:"#e65100", bg:"#fff3e0" },
+  { id:"vencida_verificar",                   label:"Scaduta — verif.",  color:"#E30613", bg:"#ffebee" },
+  { id:"ricevuta",                            label:"Ricevuta ✓",        color:"#28a745", bg:"#e8f5e9" },
+];
+
+const ACCISE_PAESI = [
+  { code:"IT", flag:"🇮🇹", label:"Italia",  organismo:"ADM — Agenzia Dogane" },
+  { code:"FR", flag:"🇫🇷", label:"Francia", organismo:"Direction Générale des Douanes" },
+  { code:"DE", flag:"🇩🇪", label:"Germania",organismo:"Hauptzollamt" },
+  { code:"ES", flag:"🇪🇸", label:"Spagna",  organismo:"AEAT — Agencia Tributaria" },
+];
+
+function AcciseGasolioTab({ data, persist }) {
+  const fmtN  = v => new Intl.NumberFormat("es-ES",{style:"currency",currency:"EUR",minimumFractionDigits:2}).format(v||0);
+  const fmtL  = v => new Intl.NumberFormat("es-ES",{minimumFractionDigits:2,maximumFractionDigits:2}).format(v||0);
+  const [statusModal, setStatusModal] = useState(null); // { praticaId, status }
+
+  const gasoil = data.pratiche_recupero?.accisas_gasoil || null;
+  const pratiche = gasoil?.pratiche || [];
+  const resumen  = gasoil?.resumen_EF2 || {};
+  const comision = gasoil?._comision_bim || {};
+
+  const getStatus = (id) => data.acciseStatus?.[id] || { stato:"pending", dataInvio:"", importoRicevuto:"", note:"" };
+  const saveStatus = (id, updates) => {
+    const current = getStatus(id);
+    persist({ ...data, acciseStatus: { ...(data.acciseStatus||{}), [id]: { ...current, ...updates } } });
+    setStatusModal(null);
+  };
+
+  const getStatusOpt = (pratica) => {
+    const st = getStatus(pratica.id);
+    // usa stato localStorage se impostato manualmente, altrimenti usa quello del JSON
+    const statoId = (st.stato && st.stato !== "pending") ? st.stato : (pratica.status || "pending");
+    return ACCISE_STATUS_OPTS.find(s => s.id === statoId) || ACCISE_STATUS_OPTS[0];
+  };
+
+  // Raggruppa per paese
+  const byPaese = useMemo(() => {
+    const m = {};
+    ACCISE_PAESI.forEach(p => { m[p.code] = []; });
+    pratiche.forEach(pr => { if (m[pr.pais]) m[pr.pais].push(pr); });
+    return m;
+  }, [pratiche]);
+
+  const totLitri     = pratiche.reduce((s, p) => s + (p.litrosDeclarados || 0), 0);
+  const totBruto     = pratiche.reduce((s, p) => s + (p.importeBrutoEstimado || 0), 0);
+  const totRicevuto  = pratiche.reduce((s, p) => s + (parseFloat(getStatus(p.id).importoRicevuto) || p.importeRecibido || 0), 0);
+  const paesiAttivi  = ACCISE_PAESI.filter(p => byPaese[p.code].length > 0);
+
+  if (!gasoil) {
+    return (
+      <div style={{ padding:"40px 0", textAlign:"center", color:"#bbb" }}>
+        <div style={{ fontSize:32, marginBottom:12 }}>⛽</div>
+        <div style={{ fontSize:14, fontWeight:600 }}>Nessun dato accise gasolio</div>
+        <div style={{ fontSize:12, marginTop:6 }}>
+          Importa un JSON con la chiave <code style={{background:"#f5f5f5",padding:"2px 6px",borderRadius:4}}>pratiche_recupero.accisas_gasoil</code>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      {/* Header */}
+      <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20 }}>
+        <div className="section-title">Recupero Accise Gasolio ⛽</div>
+        <div style={{ fontSize:11,color:"#999",fontFamily:"'IBM Plex Mono',monospace" }}>
+          Gestore: <strong style={{color:"#1A1A1A"}}>{gasoil?._comision_bim ? "BIM Refund (BIM Service Srl)" : "—"}</strong>
+        </div>
+      </div>
+
+      {/* KPI */}
+      <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr 1fr 1fr",gap:14,marginBottom:20 }}>
+        <div className="kpi-card" style={{ borderLeftColor:"#F5C800" }}>
+          <div className="kpi-label">Litri dichiarati totali</div>
+          <div className="kpi-value" style={{ color:"#b8860b" }}>{fmtL(totLitri)} L</div>
+          <div style={{ fontSize:10,color:"#bbb",marginTop:4 }}>Tutte le pratiche attive</div>
+        </div>
+        <div className="kpi-card" style={{ borderLeftColor:"#3949ab" }}>
+          <div className="kpi-label">Importo bruto stimato</div>
+          <div className="kpi-value" style={{ color:"#3949ab" }}>{fmtN(totBruto)}</div>
+          <div style={{ fontSize:10,color:"#bbb",marginTop:4 }}>Al lordo commissioni BIM</div>
+        </div>
+        <div className="kpi-card" style={{ borderLeftColor:"#28a745" }}>
+          <div className="kpi-label">Importo ricevuto</div>
+          <div className="kpi-value" style={{ color: totRicevuto > 0 ? "#28a745" : "#ccc" }}>{fmtN(totRicevuto)}</div>
+          <div style={{ fontSize:10,color:"#bbb",marginTop:4 }}>{totRicevuto > 0 ? "✓ Parzialmente incassato" : "In attesa rimborso"}</div>
+        </div>
+        <div className="kpi-card" style={{ borderLeftColor:"#e65100" }}>
+          <div className="kpi-label">Paesi attivi</div>
+          <div className="kpi-value" style={{ color:"#e65100" }}>{paesiAttivi.length}</div>
+          <div style={{ fontSize:10,color:"#bbb",marginTop:4 }}>{paesiAttivi.map(p=>p.flag).join(" ")}</div>
+        </div>
+      </div>
+
+      {/* Nota commissioni BIM */}
+      {comision && (
+        <div style={{ background:"#fffde7",border:"1.5px solid #ffe082",borderRadius:10,padding:"10px 16px",marginBottom:20,fontSize:12 }}>
+          <strong>💼 Commissione BIM Refund:</strong> Fisso <strong>€{comision.fijo_por_practica || 90}</strong>/pratica
+          {comision.porcentaje_variable && <> + <strong>{comision.porcentaje_variable}</strong> variabile</>}
+          {comision.regla && <span style={{color:"#b8860b",marginLeft:8}}> · {comision.regla}</span>}
+        </div>
+      )}
+
+      {/* Cards per paese */}
+      <div style={{ display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:12,marginBottom:20 }}>
+        {ACCISE_PAESI.map(paese => {
+          const prat = byPaese[paese.code] || [];
+          if (prat.length === 0) {
+            return (
+              <div key={paese.code} style={{
+                background:"white",borderRadius:10,padding:"14px 14px 12px",
+                border:"2px solid #EBEBEB",opacity:0.45
+              }}>
+                <div style={{ fontSize:22,marginBottom:6 }}>{paese.flag}</div>
+                <div style={{ fontWeight:800,fontSize:13,marginBottom:2 }}>{paese.label}</div>
+                <div style={{ fontFamily:"'IBM Plex Mono',monospace",fontSize:14,color:"#ccc" }}>—</div>
+                <div style={{ fontSize:10,color:"#bbb",marginTop:6 }}>Nessuna pratica</div>
+              </div>
+            );
+          }
+          const totLitriP = prat.reduce((s,p)=>s+(p.litrosDeclarados||0),0);
+          const totBrutoP = prat.reduce((s,p)=>s+(p.importeBrutoEstimado||0),0);
+          const stOpt = getStatusOpt(prat[0]);
+          return (
+            <div key={paese.code} style={{
+              background:"white",borderRadius:10,padding:"14px 14px 12px",
+              border:"2px solid #EBEBEB",cursor:"default",
+              boxShadow:"0 1px 4px rgba(0,0,0,0.05)"
+            }}>
+              <div style={{ fontSize:22,marginBottom:6 }}>{paese.flag}</div>
+              <div style={{ fontWeight:800,fontSize:13,marginBottom:2 }}>{paese.label}</div>
+              <div style={{ fontFamily:"'IBM Plex Mono',monospace",fontWeight:700,fontSize:15,color:"#b8860b",marginBottom:4 }}>
+                {fmtN(totBrutoP)}
+              </div>
+              <div style={{ fontSize:10,color:"#999",fontFamily:"'IBM Plex Mono',monospace",marginBottom:8 }}>
+                {fmtL(totLitriP)} L
+              </div>
+              <div style={{ marginBottom:8 }}>
+                <span style={{ fontSize:9,fontWeight:700,padding:"2px 7px",borderRadius:10,
+                  background:stOpt.bg, color:stOpt.color, letterSpacing:"0.05em" }}>
+                  {stOpt.label}
+                </span>
+              </div>
+              <div style={{ fontSize:9,color:"#bbb",lineHeight:1.4,marginBottom:6 }}>
+                {paese.organismo}
+              </div>
+              <button className="btn-ghost" style={{ fontSize:9,padding:"3px 8px",width:"100%" }}
+                onClick={() => setStatusModal({ praticaId: prat[0].id, status: getStatus(prat[0].id) })}>
+                Aggiorna stato
+              </button>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Tabella pratiche */}
+      <div className="card">
+        <div style={{ fontSize:10,fontWeight:700,letterSpacing:"1.5px",textTransform:"uppercase",color:"#bbb",marginBottom:14 }}>
+          Dettaglio pratiche
+        </div>
+        <table>
+          <thead>
+            <tr>
+              <th>ID Pratica</th>
+              <th>Paese</th>
+              <th>Periodo</th>
+              <th>Normativa</th>
+              <th style={{textAlign:"right"}}>Litri</th>
+              <th style={{textAlign:"right"}}>Aliquota (€/kL)</th>
+              <th style={{textAlign:"right"}}>Bruto Stimato</th>
+              <th style={{textAlign:"right"}}>Ricevuto</th>
+              <th>Scadenza</th>
+              <th>Status</th>
+              <th style={{textAlign:"center"}}>Azioni</th>
+            </tr>
+          </thead>
+          <tbody>
+            {pratiche.map(pr => {
+              const stOpt = getStatusOpt(pr);
+              const pi    = ACCISE_PAESI.find(p => p.code === pr.pais);
+              const stData = getStatus(pr.id);
+              const ricevuto = parseFloat(stData.importoRicevuto) || pr.importeRecibido || 0;
+              return (
+                <tr key={pr.id}>
+                  <td style={{ fontWeight:700,color:"#E30613",fontFamily:"'IBM Plex Mono',monospace",fontSize:11 }}>{pr.id}</td>
+                  <td>{pi ? `${pi.flag} ${pi.label}` : pr.pais}</td>
+                  <td style={{ fontSize:11,color:"#666" }}>{pr.periodo || pr.trimestre}</td>
+                  <td style={{ fontSize:10,color:"#999" }}>{pr.normativa}</td>
+                  <td style={{ textAlign:"right",fontFamily:"'IBM Plex Mono',monospace",fontWeight:600 }}>
+                    {fmtL(pr.litrosDeclarados)}
+                  </td>
+                  <td style={{ textAlign:"right",fontFamily:"'IBM Plex Mono',monospace",color:"#666" }}>
+                    {pr.alicuotaReembolso_por1000L ? `€${pr.alicuotaReembolso_por1000L}/kL` : "—"}
+                  </td>
+                  <td style={{ textAlign:"right",fontFamily:"'IBM Plex Mono',monospace",fontWeight:700,color:"#b8860b" }}>
+                    {fmtN(pr.importeBrutoEstimado)}
+                  </td>
+                  <td style={{ textAlign:"right",fontFamily:"'IBM Plex Mono',monospace",fontWeight:700,
+                    color: ricevuto > 0 ? "#28a745" : "#ccc" }}>
+                    {ricevuto > 0 ? fmtN(ricevuto) : "—"}
+                  </td>
+                  <td style={{ fontSize:11,color: pr.fechaLimiteEnvio && pr.fechaLimiteEnvio < new Date().toISOString().slice(0,10) ? "#E30613" : "#666",
+                    fontFamily:"'IBM Plex Mono',monospace" }}>
+                    {pr.fechaLimiteEnvio || "—"}
+                  </td>
+                  <td>
+                    <span style={{ fontSize:9,fontWeight:700,padding:"2px 7px",borderRadius:10,
+                      background:stOpt.bg, color:stOpt.color, letterSpacing:"0.05em", whiteSpace:"nowrap" }}>
+                      {stOpt.label}
+                    </span>
+                  </td>
+                  <td style={{ textAlign:"center" }}>
+                    <button className="btn-ghost" style={{ fontSize:9,padding:"3px 10px" }}
+                      onClick={() => setStatusModal({ praticaId: pr.id, status: getStatus(pr.id) })}>
+                      Aggiorna
+                    </button>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+          <tfoot>
+            <tr style={{ background:"#FAFAFA" }}>
+              <td colSpan={4} style={{ fontWeight:800,fontSize:12,textTransform:"uppercase",letterSpacing:"0.5px" }}>Totale</td>
+              <td style={{ textAlign:"right",fontFamily:"'IBM Plex Mono',monospace",fontWeight:800 }}>{fmtL(totLitri)} L</td>
+              <td/>
+              <td style={{ textAlign:"right",fontFamily:"'IBM Plex Mono',monospace",fontWeight:900,color:"#b8860b",fontSize:14 }}>{fmtN(totBruto)}</td>
+              <td style={{ textAlign:"right",fontFamily:"'IBM Plex Mono',monospace",fontWeight:900,color: totRicevuto>0?"#28a745":"#ccc",fontSize:14 }}>
+                {totRicevuto > 0 ? fmtN(totRicevuto) : "—"}
+              </td>
+              <td colSpan={3}/>
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+
+      {/* Modal aggiorna stato pratica */}
+      {statusModal && (() => {
+        const pr  = pratiche.find(p => p.id === statusModal.praticaId);
+        const pi  = ACCISE_PAESI.find(p => p.code === pr?.pais);
+        const st  = statusModal.status;
+        const [form, setForm] = useState({ ...st });
+        const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
+        return (
+          <div className="modal-overlay" onClick={() => setStatusModal(null)}>
+            <div className="modal" style={{ maxWidth:440 }} onClick={e => e.stopPropagation()}>
+              <div style={{ display:"flex",justifyContent:"space-between",marginBottom:20 }}>
+                <div className="modal-title">{pi?.flag} {pr?.id} — Stato pratica</div>
+                <button onClick={() => setStatusModal(null)} style={{ background:"none",fontSize:20,color:"#999" }}>×</button>
+              </div>
+              <div style={{ background:"#FAFAFA",borderRadius:8,padding:"10px 14px",marginBottom:16,fontSize:12,color:"#666" }}>
+                <strong>Periodo:</strong> {pr?.periodo || pr?.trimestre}<br/>
+                <strong>Scadenza invio:</strong> {pr?.fechaLimiteEnvio || "—"} · <strong>Organismo:</strong> {pr?.organismo || pi?.organismo}
+              </div>
+              <div className="form-row">
+                <div>
+                  <label>Stato pratica</label>
+                  <select value={form.stato} onChange={e => set("stato", e.target.value)}>
+                    {ACCISE_STATUS_OPTS.map(s => <option key={s.id} value={s.id}>{s.label}</option>)}
+                  </select>
+                </div>
+              </div>
+              <div className="form-row form-row-2">
+                <div><label>Data invio</label><input type="date" value={form.dataInvio||""} onChange={e=>set("dataInvio",e.target.value)} /></div>
+                <div><label>Importo ricevuto (€)</label><input type="number" step="0.01" value={form.importoRicevuto||""} onChange={e=>set("importoRicevuto",e.target.value)} placeholder="0.00" /></div>
+              </div>
+              <div className="form-row">
+                <div><label>Note</label><textarea value={form.note||""} onChange={e=>set("note",e.target.value)} rows={2} placeholder="Note pratica..." /></div>
+              </div>
+              <div style={{ display:"flex",gap:10,marginTop:4 }}>
+                <button className="btn-ghost" style={{ flex:1 }} onClick={() => setStatusModal(null)}>Cancelar</button>
+                <button className="btn-red" style={{ flex:1 }} onClick={() => saveStatus(statusModal.praticaId, form)}>Guardar</button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+    </div>
+  );
+}
+
 export default function IberSilosApp() {
   const [authenticated, setAuthenticated] = useState(() => {
     const token = sessionStorage.getItem('ibs_auth');
@@ -1243,6 +1532,7 @@ export default function IberSilosApp() {
     { id:"ibkr",         label:"IBKR SL",      icon: <svg viewBox="0 0 24 24" width={16} height={16} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg> },
     { id:"contabilidad", label:"Contabilidad", icon: <svg viewBox="0 0 24 24" width={16} height={16} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg> },
     { id:"iva_estera",   label:"IVA Estera",   icon: <svg viewBox="0 0 24 24" width={16} height={16} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg> },
+    { id:"accise_gasolio", label:"Accise Gasolio", icon: <svg viewBox="0 0 24 24" width={16} height={16} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 22V8l9-6 9 6v14"/><path d="M9 22V12h6v10"/><path d="M14 6.5v2"/></svg> },
   ];
 
   return (
@@ -1433,6 +1723,7 @@ export default function IberSilosApp() {
           {tab==="ibkr" && <IbkrTab data={data} setIbkrModal={setIbkrModal} deleteIbkr={deleteIbkr} ibkrLive={ibkrLive} />}
           {tab==="contabilidad" && <ContabilidadTab data={data} persist={persist} contabView={contabView} setContabView={setContabView} mayorCuenta={mayorCuenta} setMayorCuenta={setMayorCuenta} setAsientoModal={setAsientoModal} deleteAsiento={deleteAsiento} exportContabCSV={exportContabCSV} />}
           {tab==="iva_estera" && <IvaEsteraTab data={data} persist={persist} ejercicio={ejercicio} EJERCICIOS={EJERCICIOS} exportIvaEsteraCSV={exportIvaEsteraCSV} />}
+          {tab==="accise_gasolio" && <AcciseGasolioTab data={data} persist={persist} />}
         </div>
       </div>
 
