@@ -942,13 +942,13 @@ function IvaEsteraTab({ data, persist, ejercicio, EJERCICIOS, exportIvaEsteraCSV
 
 // ── ACCISE GASOLIO TAB ────────────────────────────────────────────────────────
 const ACCISE_STATUS_OPTS = [
-  { id:"pending",                             label:"Da avviare",        color:"#999",    bg:"#F5F5F5" },
-  { id:"en_curso_pendiente_cierre_junio",     label:"In corso — giu.",   color:"#b8860b", bg:"#fffde7" },
-  { id:"en_curso_pendiente_cierre_semestre",  label:"In corso — sem.",   color:"#b8860b", bg:"#fffde7" },
-  { id:"pendiente_activacion_LaClau",         label:"Pend. attivazione", color:"#e65100", bg:"#fff3e0" },
-  { id:"pendiente_datos_DKV",                 label:"Pend. dati DKV",    color:"#e65100", bg:"#fff3e0" },
-  { id:"vencida_verificar",                   label:"Scaduta — verif.",  color:"#E30613", bg:"#ffebee" },
-  { id:"ricevuta",                            label:"Ricevuta ✓",        color:"#28a745", bg:"#e8f5e9" },
+  { id:"pending",                             label:"Por iniciar",        color:"#999",    bg:"#F5F5F5" },
+  { id:"en_curso_pendiente_cierre_junio",     label:"En curso — jun.",    color:"#b8860b", bg:"#fffde7" },
+  { id:"en_curso_pendiente_cierre_semestre",  label:"En curso — sem.",    color:"#b8860b", bg:"#fffde7" },
+  { id:"pendiente_activacion_LaClau",         label:"Pend. activación",   color:"#e65100", bg:"#fff3e0" },
+  { id:"pendiente_datos_DKV",                 label:"Pend. datos DKV",    color:"#e65100", bg:"#fff3e0" },
+  { id:"vencida_verificar",                   label:"Vencida — verif.",   color:"#E30613", bg:"#ffebee" },
+  { id:"ricevuta",                            label:"Recibida ✓",         color:"#28a745", bg:"#e8f5e9" },
 ];
 
 const ACCISE_PAESI = [
@@ -956,37 +956,37 @@ const ACCISE_PAESI = [
     code:"IT", flag:"🇮🇹", label:"Italia",
     organismo:"ADM — Agenzia delle Dogane e dei Monopoli",
     aliquota2026: 229.18,          // €/1000L — gasolio standard (Quadro A-1); HVO eco: 214.18
-    aliquotaNote: "229.18 €/kL gasolio · 214.18 €/kL HVO eco (D.Lgs. 504/95 art. 24-ter)",
+    aliquotaNote: "229.18 €/kL gasóleo estándar · 214.18 €/kL HVO eco (D.Lgs. 504/95 art. 24-ter)",
     normativa:"D.Lgs. 504/95 art. 24-ter",
-    periodicita:"Trimestrale",
-    scadenzaInvio:"30 gg fine trimestre",
+    periodicita:"Trimestral",
+    scadenzaInvio:"30 días fin trimestre",
   },
   {
     code:"FR", flag:"🇫🇷", label:"Francia",
     organismo:"Direction Générale des Douanes (DGDDI)",
     aliquota2026: 155.60,          // €/1000L — TICPE 2026: 60.75 - 45.19 = 15.56 €/hL (>7.5t)
-    aliquotaNote: "155.60 €/kL — TICPE 2026: tasso naz. 60.75 €/hL − ridotto TRM 45.19 €/hL",
+    aliquotaNote: "155.60 €/kL — TICPE 2026: tipo nac. 60.75 €/hL − reducido TRM 45.19 €/hL",
     normativa:"Code des douanes — ex-TICPE",
-    periodicita:"Mensile / Trimestrale / Annuale",
-    scadenzaInvio:"Dichiarazione TVA (dal 2025)",
+    periodicita:"Mensual / Trimestral / Anual",
+    scadenzaInvio:"Declaración IVA (desde 2025)",
   },
   {
     code:"DE", flag:"🇩🇪", label:"Germania",
     organismo:"Hauptzollamt — Bundeszollverwaltung",
     aliquota2026: 214.80,          // €/1000L — §57 EnergieStG 2026 (era 64.44 nel 2025)
-    aliquotaNote: "214.80 €/kL dal 01/01/2026 (§57 EnergieStG) — era 64.44 nel 2025",
+    aliquotaNote: "214.80 €/kL desde 01/01/2026 (§57 EnergieStG) — era 64.44 en 2025",
     normativa:"§ 57 Energiesteuergesetz (EnergieStG)",
-    periodicita:"Annuale",
-    scadenzaInvio:"31/12 anno successivo",
+    periodicita:"Anual",
+    scadenzaInvio:"31/12 año siguiente",
   },
   {
     code:"ES", flag:"🇪🇸", label:"Spagna",
     organismo:"AEAT — Agencia Estatal de Administración Tributaria",
     aliquota2026: 49.00,           // €/1000L — tasso fisso da 2019; aiuto straord. +200 €/kL mar-giu 2026
-    aliquotaNote: "49.00 €/kL fisso (dal 2019) + 200 €/kL aiuto straord. 22/03–30/06/2026",
+    aliquotaNote: "49.00 €/kL fijo (desde 2019) + 200 €/kL ayuda extraord. 22/03–30/06/2026",
     normativa:"Ley 38/1992 — Impuestos Especiales",
-    periodicita:"Annuale (km percorsi anno precedente)",
-    scadenzaInvio:"31/03 anno successivo",
+    periodicita:"Anual (km recorridos año anterior)",
+    scadenzaInvio:"31/03 año siguiente",
   },
 ];
 
@@ -1031,9 +1031,9 @@ function AcciseGasolioTab({ data, persist }) {
     return (
       <div style={{ padding:"40px 0", textAlign:"center", color:"#bbb" }}>
         <div style={{ fontSize:32, marginBottom:12 }}>⛽</div>
-        <div style={{ fontSize:14, fontWeight:600 }}>Nessun dato accise gasolio</div>
+        <div style={{ fontSize:14, fontWeight:600 }}>Sin datos de devolución de accisas de gasóleo</div>
         <div style={{ fontSize:12, marginTop:6 }}>
-          Importa un JSON con la chiave <code style={{background:"#f5f5f5",padding:"2px 6px",borderRadius:4}}>pratiche_recupero.accisas_gasoil</code>
+          Importa un JSON con la clave <code style={{background:"#f5f5f5",padding:"2px 6px",borderRadius:4}}>pratiche_recupero.accisas_gasoil</code>
         </div>
       </div>
     );
@@ -1043,31 +1043,31 @@ function AcciseGasolioTab({ data, persist }) {
     <div>
       {/* Header */}
       <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20 }}>
-        <div className="section-title">Recupero Accise Gasolio ⛽</div>
+        <div className="section-title">Devolución Accisas Gasóleo ⛽</div>
         <div style={{ fontSize:11,color:"#999",fontFamily:"'IBM Plex Mono',monospace" }}>
-          Gestore: <strong style={{color:"#1A1A1A"}}>{gasoil?._comision_bim ? "BIM Refund (BIM Service Srl)" : "—"}</strong>
+          Gestor: <strong style={{color:"#1A1A1A"}}>{gasoil?._comision_bim ? "BIM Refund (BIM Service Srl)" : "—"}</strong>
         </div>
       </div>
 
       {/* KPI */}
       <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr 1fr 1fr",gap:14,marginBottom:20 }}>
         <div className="kpi-card" style={{ borderLeftColor:"#F5C800" }}>
-          <div className="kpi-label">Litri dichiarati totali</div>
+          <div className="kpi-label">Litros declarados totales</div>
           <div className="kpi-value" style={{ color:"#b8860b" }}>{fmtL(totLitri)} L</div>
-          <div style={{ fontSize:10,color:"#bbb",marginTop:4 }}>Tutte le pratiche attive</div>
+          <div style={{ fontSize:10,color:"#bbb",marginTop:4 }}>Todos los expedientes activos</div>
         </div>
         <div className="kpi-card" style={{ borderLeftColor:"#3949ab" }}>
-          <div className="kpi-label">Importo bruto stimato</div>
+          <div className="kpi-label">Importe bruto estimado</div>
           <div className="kpi-value" style={{ color:"#3949ab" }}>{fmtN(totBruto)}</div>
-          <div style={{ fontSize:10,color:"#bbb",marginTop:4 }}>Al lordo commissioni BIM</div>
+          <div style={{ fontSize:10,color:"#bbb",marginTop:4 }}>Antes de comisión BIM</div>
         </div>
         <div className="kpi-card" style={{ borderLeftColor:"#28a745" }}>
-          <div className="kpi-label">Importo ricevuto</div>
+          <div className="kpi-label">Importe recibido</div>
           <div className="kpi-value" style={{ color: totRicevuto > 0 ? "#28a745" : "#ccc" }}>{fmtN(totRicevuto)}</div>
-          <div style={{ fontSize:10,color:"#bbb",marginTop:4 }}>{totRicevuto > 0 ? "✓ Parzialmente incassato" : "In attesa rimborso"}</div>
+          <div style={{ fontSize:10,color:"#bbb",marginTop:4 }}>{totRicevuto > 0 ? "✓ Parcialmente cobrado" : "Pendiente de devolución"}</div>
         </div>
         <div className="kpi-card" style={{ borderLeftColor:"#e65100" }}>
-          <div className="kpi-label">Paesi attivi</div>
+          <div className="kpi-label">Países activos</div>
           <div className="kpi-value" style={{ color:"#e65100" }}>{paesiAttivi.length}</div>
           <div style={{ fontSize:10,color:"#bbb",marginTop:4 }}>{paesiAttivi.map(p=>p.flag).join(" ")}</div>
         </div>
@@ -1076,8 +1076,8 @@ function AcciseGasolioTab({ data, persist }) {
       {/* Nota commissioni BIM */}
       {comision && (
         <div style={{ background:"#fffde7",border:"1.5px solid #ffe082",borderRadius:10,padding:"10px 16px",marginBottom:20,fontSize:12 }}>
-          <strong>💼 Commissione BIM Refund:</strong> Fisso <strong>€{comision.fijo_por_practica || 90}</strong>/pratica
-          {comision.porcentaje_variable && <> + <strong>{comision.porcentaje_variable}</strong> variabile</>}
+          <strong>💼 Comisión BIM Refund:</strong> Fijo <strong>€{comision.fijo_por_practica || 90}</strong>/expediente
+          {comision.porcentaje_variable && <> + <strong>{comision.porcentaje_variable}</strong> variable</>}
           {comision.regla && <span style={{color:"#b8860b",marginLeft:8}}> · {comision.regla}</span>}
         </div>
       )}
@@ -1085,7 +1085,7 @@ function AcciseGasolioTab({ data, persist }) {
       {/* Riepilogo aliquote ufficiali 2026 */}
       <div style={{ background:"#e8eaf6",border:"1.5px solid #c5cae9",borderRadius:10,padding:"10px 16px",marginBottom:20,fontSize:11 }}>
         <div style={{ fontWeight:700,color:"#3949ab",marginBottom:6,fontSize:11,letterSpacing:"0.05em" }}>
-          📋 Aliquote rimborso ufficiali 2026 (verificate)
+          📋 Tipos de devolución oficiales 2026 (verificados)
         </div>
         <div style={{ display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:8 }}>
           {ACCISE_PAESI.map(p => (
@@ -1111,7 +1111,7 @@ function AcciseGasolioTab({ data, persist }) {
                 <div style={{ fontSize:22,marginBottom:6 }}>{paese.flag}</div>
                 <div style={{ fontWeight:800,fontSize:13,marginBottom:2 }}>{paese.label}</div>
                 <div style={{ fontFamily:"'IBM Plex Mono',monospace",fontSize:14,color:"#ccc" }}>—</div>
-                <div style={{ fontSize:10,color:"#bbb",marginTop:6 }}>Nessuna pratica</div>
+                <div style={{ fontSize:10,color:"#bbb",marginTop:6 }}>Sin expedientes</div>
               </div>
             );
           }
@@ -1146,7 +1146,7 @@ function AcciseGasolioTab({ data, persist }) {
               </div>
               <button className="btn-ghost" style={{ fontSize:9,padding:"3px 8px",width:"100%" }}
                 onClick={() => setStatusModal({ praticaId: prat[0].id, status: getStatus(prat[0].id) })}>
-                Aggiorna stato
+                Actualizar estado
               </button>
             </div>
           );
@@ -1156,22 +1156,22 @@ function AcciseGasolioTab({ data, persist }) {
       {/* Tabella pratiche */}
       <div className="card">
         <div style={{ fontSize:10,fontWeight:700,letterSpacing:"1.5px",textTransform:"uppercase",color:"#bbb",marginBottom:14 }}>
-          Dettaglio pratiche
+          Detalle de expedientes
         </div>
         <table>
           <thead>
             <tr>
-              <th>ID Pratica</th>
-              <th>Paese</th>
-              <th>Periodo</th>
+              <th>ID Expediente</th>
+              <th>País</th>
+              <th>Período</th>
               <th>Normativa</th>
-              <th style={{textAlign:"right"}}>Litri</th>
-              <th style={{textAlign:"right"}}>Aliquota (€/kL)</th>
-              <th style={{textAlign:"right"}}>Bruto Stimato</th>
-              <th style={{textAlign:"right"}}>Ricevuto</th>
-              <th>Scadenza</th>
-              <th>Status</th>
-              <th style={{textAlign:"center"}}>Azioni</th>
+              <th style={{textAlign:"right"}}>Litros</th>
+              <th style={{textAlign:"right"}}>Tipo (€/kL)</th>
+              <th style={{textAlign:"right"}}>Bruto Estimado</th>
+              <th style={{textAlign:"right"}}>Recibido</th>
+              <th>Vencimiento</th>
+              <th>Estado</th>
+              <th style={{textAlign:"center"}}>Acciones</th>
             </tr>
           </thead>
           <tbody>
@@ -1200,7 +1200,7 @@ function AcciseGasolioTab({ data, persist }) {
                           color: match ? "#28a745" : "#b8860b",
                           fontWeight: 700, cursor: pi?.aliquotaNote ? "help" : "default"
                         }}>
-                          €{jsonVal}/kL{!match && refVal ? <span style={{fontSize:9,color:"#999",display:"block"}}>rif. €{refVal}</span> : null}
+                          €{jsonVal}/kL{!match && refVal ? <span style={{fontSize:9,color:"#999",display:"block"}}>ref. €{refVal}</span> : null}
                         </span>
                       );
                     })()}
@@ -1225,7 +1225,7 @@ function AcciseGasolioTab({ data, persist }) {
                   <td style={{ textAlign:"center" }}>
                     <button className="btn-ghost" style={{ fontSize:9,padding:"3px 10px" }}
                       onClick={() => setStatusModal({ praticaId: pr.id, status: getStatus(pr.id) })}>
-                      Aggiorna
+                      Actualizar
                     </button>
                   </td>
                 </tr>
@@ -1234,7 +1234,7 @@ function AcciseGasolioTab({ data, persist }) {
           </tbody>
           <tfoot>
             <tr style={{ background:"#FAFAFA" }}>
-              <td colSpan={4} style={{ fontWeight:800,fontSize:12,textTransform:"uppercase",letterSpacing:"0.5px" }}>Totale</td>
+              <td colSpan={4} style={{ fontWeight:800,fontSize:12,textTransform:"uppercase",letterSpacing:"0.5px" }}>Total</td>
               <td style={{ textAlign:"right",fontFamily:"'IBM Plex Mono',monospace",fontWeight:800 }}>{fmtL(totLitri)} L</td>
               <td/>
               <td style={{ textAlign:"right",fontFamily:"'IBM Plex Mono',monospace",fontWeight:900,color:"#b8860b",fontSize:14 }}>{fmtN(totBruto)}</td>
@@ -1258,27 +1258,27 @@ function AcciseGasolioTab({ data, persist }) {
           <div className="modal-overlay" onClick={() => setStatusModal(null)}>
             <div className="modal" style={{ maxWidth:440 }} onClick={e => e.stopPropagation()}>
               <div style={{ display:"flex",justifyContent:"space-between",marginBottom:20 }}>
-                <div className="modal-title">{pi?.flag} {pr?.id} — Stato pratica</div>
+                <div className="modal-title">{pi?.flag} {pr?.id} — Estado del expediente</div>
                 <button onClick={() => setStatusModal(null)} style={{ background:"none",fontSize:20,color:"#999" }}>×</button>
               </div>
               <div style={{ background:"#FAFAFA",borderRadius:8,padding:"10px 14px",marginBottom:16,fontSize:12,color:"#666" }}>
-                <strong>Periodo:</strong> {pr?.periodo || pr?.trimestre}<br/>
-                <strong>Scadenza invio:</strong> {pr?.fechaLimiteEnvio || "—"} · <strong>Organismo:</strong> {pr?.organismo || pi?.organismo}
+                <strong>Período:</strong> {pr?.periodo || pr?.trimestre}<br/>
+                <strong>Vencimiento envío:</strong> {pr?.fechaLimiteEnvio || "—"} · <strong>Organismo:</strong> {pr?.organismo || pi?.organismo}
               </div>
               <div className="form-row">
                 <div>
-                  <label>Stato pratica</label>
+                  <label>Estado del expediente</label>
                   <select value={form.stato} onChange={e => set("stato", e.target.value)}>
                     {ACCISE_STATUS_OPTS.map(s => <option key={s.id} value={s.id}>{s.label}</option>)}
                   </select>
                 </div>
               </div>
               <div className="form-row form-row-2">
-                <div><label>Data invio</label><input type="date" value={form.dataInvio||""} onChange={e=>set("dataInvio",e.target.value)} /></div>
-                <div><label>Importo ricevuto (€)</label><input type="number" step="0.01" value={form.importoRicevuto||""} onChange={e=>set("importoRicevuto",e.target.value)} placeholder="0.00" /></div>
+                <div><label>Fecha envío</label><input type="date" value={form.dataInvio||""} onChange={e=>set("dataInvio",e.target.value)} /></div>
+                <div><label>Importe recibido (€)</label><input type="number" step="0.01" value={form.importoRicevuto||""} onChange={e=>set("importoRicevuto",e.target.value)} placeholder="0.00" /></div>
               </div>
               <div className="form-row">
-                <div><label>Note</label><textarea value={form.note||""} onChange={e=>set("note",e.target.value)} rows={2} placeholder="Note pratica..." /></div>
+                <div><label>Notas</label><textarea value={form.note||""} onChange={e=>set("note",e.target.value)} rows={2} placeholder="Notas del expediente..." /></div>
               </div>
               <div style={{ display:"flex",gap:10,marginTop:4 }}>
                 <button className="btn-ghost" style={{ flex:1 }} onClick={() => setStatusModal(null)}>Cancelar</button>
