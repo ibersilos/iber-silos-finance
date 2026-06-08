@@ -952,10 +952,42 @@ const ACCISE_STATUS_OPTS = [
 ];
 
 const ACCISE_PAESI = [
-  { code:"IT", flag:"🇮🇹", label:"Italia",  organismo:"ADM — Agenzia Dogane" },
-  { code:"FR", flag:"🇫🇷", label:"Francia", organismo:"Direction Générale des Douanes" },
-  { code:"DE", flag:"🇩🇪", label:"Germania",organismo:"Hauptzollamt" },
-  { code:"ES", flag:"🇪🇸", label:"Spagna",  organismo:"AEAT — Agencia Tributaria" },
+  {
+    code:"IT", flag:"🇮🇹", label:"Italia",
+    organismo:"ADM — Agenzia delle Dogane e dei Monopoli",
+    aliquota2026: 229.18,          // €/1000L — gasolio standard (Quadro A-1); HVO eco: 214.18
+    aliquotaNote: "229.18 €/kL gasolio · 214.18 €/kL HVO eco (D.Lgs. 504/95 art. 24-ter)",
+    normativa:"D.Lgs. 504/95 art. 24-ter",
+    periodicita:"Trimestrale",
+    scadenzaInvio:"30 gg fine trimestre",
+  },
+  {
+    code:"FR", flag:"🇫🇷", label:"Francia",
+    organismo:"Direction Générale des Douanes (DGDDI)",
+    aliquota2026: 155.60,          // €/1000L — TICPE 2026: 60.75 - 45.19 = 15.56 €/hL (>7.5t)
+    aliquotaNote: "155.60 €/kL — TICPE 2026: tasso naz. 60.75 €/hL − ridotto TRM 45.19 €/hL",
+    normativa:"Code des douanes — ex-TICPE",
+    periodicita:"Mensile / Trimestrale / Annuale",
+    scadenzaInvio:"Dichiarazione TVA (dal 2025)",
+  },
+  {
+    code:"DE", flag:"🇩🇪", label:"Germania",
+    organismo:"Hauptzollamt — Bundeszollverwaltung",
+    aliquota2026: 214.80,          // €/1000L — §57 EnergieStG 2026 (era 64.44 nel 2025)
+    aliquotaNote: "214.80 €/kL dal 01/01/2026 (§57 EnergieStG) — era 64.44 nel 2025",
+    normativa:"§ 57 Energiesteuergesetz (EnergieStG)",
+    periodicita:"Annuale",
+    scadenzaInvio:"31/12 anno successivo",
+  },
+  {
+    code:"ES", flag:"🇪🇸", label:"Spagna",
+    organismo:"AEAT — Agencia Estatal de Administración Tributaria",
+    aliquota2026: 49.00,           // €/1000L — tasso fisso da 2019; aiuto straord. +200 €/kL mar-giu 2026
+    aliquotaNote: "49.00 €/kL fisso (dal 2019) + 200 €/kL aiuto straord. 22/03–30/06/2026",
+    normativa:"Ley 38/1992 — Impuestos Especiales",
+    periodicita:"Annuale (km percorsi anno precedente)",
+    scadenzaInvio:"31/03 anno successivo",
+  },
 ];
 
 function AcciseGasolioTab({ data, persist }) {
@@ -1050,6 +1082,22 @@ function AcciseGasolioTab({ data, persist }) {
         </div>
       )}
 
+      {/* Riepilogo aliquote ufficiali 2026 */}
+      <div style={{ background:"#e8eaf6",border:"1.5px solid #c5cae9",borderRadius:10,padding:"10px 16px",marginBottom:20,fontSize:11 }}>
+        <div style={{ fontWeight:700,color:"#3949ab",marginBottom:6,fontSize:11,letterSpacing:"0.05em" }}>
+          📋 Aliquote rimborso ufficiali 2026 (verificate)
+        </div>
+        <div style={{ display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:8 }}>
+          {ACCISE_PAESI.map(p => (
+            <div key={p.code} style={{ fontSize:10 }}>
+              <span style={{ fontWeight:700 }}>{p.flag} {p.label}:</span>{" "}
+              <span style={{ fontFamily:"'IBM Plex Mono',monospace",color:"#3949ab",fontWeight:700 }}>{p.aliquota2026} €/kL</span>
+              <div style={{ color:"#666",fontSize:9,marginTop:2 }}>{p.aliquotaNote}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+
       {/* Cards per paese */}
       <div style={{ display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:12,marginBottom:20 }}>
         {ACCISE_PAESI.map(paese => {
@@ -1090,8 +1138,11 @@ function AcciseGasolioTab({ data, persist }) {
                   {stOpt.label}
                 </span>
               </div>
+              <div style={{ fontSize:9,color:"#3949ab",fontFamily:"'IBM Plex Mono',monospace",fontWeight:700,marginBottom:4 }}>
+                {paese.aliquota2026} €/kL
+              </div>
               <div style={{ fontSize:9,color:"#bbb",lineHeight:1.4,marginBottom:6 }}>
-                {paese.organismo}
+                {paese.normativa}
               </div>
               <button className="btn-ghost" style={{ fontSize:9,padding:"3px 8px",width:"100%" }}
                 onClick={() => setStatusModal({ praticaId: prat[0].id, status: getStatus(prat[0].id) })}>
@@ -1138,8 +1189,21 @@ function AcciseGasolioTab({ data, persist }) {
                   <td style={{ textAlign:"right",fontFamily:"'IBM Plex Mono',monospace",fontWeight:600 }}>
                     {fmtL(pr.litrosDeclarados)}
                   </td>
-                  <td style={{ textAlign:"right",fontFamily:"'IBM Plex Mono',monospace",color:"#666" }}>
-                    {pr.alicuotaReembolso_por1000L ? `€${pr.alicuotaReembolso_por1000L}/kL` : "—"}
+                  <td style={{ textAlign:"right",fontFamily:"'IBM Plex Mono',monospace" }}>
+                    {(() => {
+                      const jsonVal = pr.alicuotaReembolso_por1000L;
+                      const refVal  = pi?.aliquota2026;
+                      if (!jsonVal) return <span style={{color:"#ccc"}}>—</span>;
+                      const match = refVal && Math.abs(jsonVal - refVal) < 0.05;
+                      return (
+                        <span title={pi?.aliquotaNote || ""} style={{
+                          color: match ? "#28a745" : "#b8860b",
+                          fontWeight: 700, cursor: pi?.aliquotaNote ? "help" : "default"
+                        }}>
+                          €{jsonVal}/kL{!match && refVal ? <span style={{fontSize:9,color:"#999",display:"block"}}>rif. €{refVal}</span> : null}
+                        </span>
+                      );
+                    })()}
                   </td>
                   <td style={{ textAlign:"right",fontFamily:"'IBM Plex Mono',monospace",fontWeight:700,color:"#b8860b" }}>
                     {fmtN(pr.importeBrutoEstimado)}
