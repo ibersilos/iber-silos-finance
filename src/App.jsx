@@ -971,7 +971,7 @@ const ACCISE_PAESI = [
     scadenzaInvio:"Declaración IVA (desde 2025)",
   },
   {
-    code:"DE", flag:"🇩🇪", label:"Germania",
+    code:"DE", flag:"🇩🇪", label:"Alemania",
     organismo:"Hauptzollamt — Bundeszollverwaltung",
     aliquota2026: 214.80,          // €/1000L — §57 EnergieStG 2026 (era 64.44 nel 2025)
     aliquotaNote: "214.80 €/kL desde 01/01/2026 (§57 EnergieStG) — era 64.44 en 2025",
@@ -980,7 +980,7 @@ const ACCISE_PAESI = [
     scadenzaInvio:"31/12 año siguiente",
   },
   {
-    code:"ES", flag:"🇪🇸", label:"Spagna",
+    code:"ES", flag:"🇪🇸", label:"España",
     organismo:"AEAT — Agencia Estatal de Administración Tributaria",
     aliquota2026: 49.00,           // €/1000L — tasso fisso da 2019; aiuto straord. +200 €/kL mar-giu 2026
     aliquotaNote: "49.00 €/kL fijo (desde 2019) + 200 €/kL ayuda extraord. 22/03–30/06/2026",
