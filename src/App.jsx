@@ -990,6 +990,46 @@ const ACCISE_PAESI = [
   },
 ];
 
+function AcciseStatusModal({ praticaId, status, pratiche, onClose, onSave }) {
+  const pr  = pratiche.find(p => p.id === praticaId);
+  const pi  = ACCISE_PAESI.find(p => p.code === pr?.pais);
+  const [form, setForm] = useState({ ...status });
+  const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal" style={{ maxWidth:440 }} onClick={e => e.stopPropagation()}>
+        <div style={{ display:"flex",justifyContent:"space-between",marginBottom:20 }}>
+          <div className="modal-title">{pi?.flag} {pr?.id} — Estado del expediente</div>
+          <button onClick={onClose} style={{ background:"none",fontSize:20,color:"#999" }}>×</button>
+        </div>
+        <div style={{ background:"#FAFAFA",borderRadius:8,padding:"10px 14px",marginBottom:16,fontSize:12,color:"#666" }}>
+          <strong>Período:</strong> {pr?.periodo || pr?.trimestre}<br/>
+          <strong>Vencimiento envío:</strong> {pr?.fechaLimiteEnvio || "—"} · <strong>Organismo:</strong> {pr?.organismo || pi?.organismo}
+        </div>
+        <div className="form-row">
+          <div>
+            <label>Estado del expediente</label>
+            <select value={form.stato} onChange={e => set("stato", e.target.value)}>
+              {ACCISE_STATUS_OPTS.map(s => <option key={s.id} value={s.id}>{s.label}</option>)}
+            </select>
+          </div>
+        </div>
+        <div className="form-row form-row-2">
+          <div><label>Fecha envío</label><input type="date" value={form.dataInvio||""} onChange={e=>set("dataInvio",e.target.value)} /></div>
+          <div><label>Importe recibido (€)</label><input type="number" step="0.01" value={form.importoRicevuto||""} onChange={e=>set("importoRicevuto",e.target.value)} placeholder="0.00" /></div>
+        </div>
+        <div className="form-row">
+          <div><label>Notas</label><textarea value={form.note||""} onChange={e=>set("note",e.target.value)} rows={2} placeholder="Notas del expediente..." /></div>
+        </div>
+        <div style={{ display:"flex",gap:10,marginTop:4 }}>
+          <button className="btn-ghost" style={{ flex:1 }} onClick={onClose}>Cancelar</button>
+          <button className="btn-red" style={{ flex:1 }} onClick={() => onSave(praticaId, form)}>Guardar</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function AcciseGasolioTab({ data, persist }) {
   const fmtN  = v => new Intl.NumberFormat("es-ES",{style:"currency",currency:"EUR",minimumFractionDigits:2}).format(v||0);
   const fmtL  = v => new Intl.NumberFormat("es-ES",{minimumFractionDigits:2,maximumFractionDigits:2}).format(v||0);
@@ -1253,46 +1293,13 @@ function AcciseGasolioTab({ data, persist }) {
       </div>
 
       {/* Modal aggiorna stato pratica */}
-      {statusModal && (() => {
-        const pr  = pratiche.find(p => p.id === statusModal.praticaId);
-        const pi  = ACCISE_PAESI.find(p => p.code === pr?.pais);
-        const st  = statusModal.status;
-        const [form, setForm] = useState({ ...st });
-        const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
-        return (
-          <div className="modal-overlay" onClick={() => setStatusModal(null)}>
-            <div className="modal" style={{ maxWidth:440 }} onClick={e => e.stopPropagation()}>
-              <div style={{ display:"flex",justifyContent:"space-between",marginBottom:20 }}>
-                <div className="modal-title">{pi?.flag} {pr?.id} — Estado del expediente</div>
-                <button onClick={() => setStatusModal(null)} style={{ background:"none",fontSize:20,color:"#999" }}>×</button>
-              </div>
-              <div style={{ background:"#FAFAFA",borderRadius:8,padding:"10px 14px",marginBottom:16,fontSize:12,color:"#666" }}>
-                <strong>Período:</strong> {pr?.periodo || pr?.trimestre}<br/>
-                <strong>Vencimiento envío:</strong> {pr?.fechaLimiteEnvio || "—"} · <strong>Organismo:</strong> {pr?.organismo || pi?.organismo}
-              </div>
-              <div className="form-row">
-                <div>
-                  <label>Estado del expediente</label>
-                  <select value={form.stato} onChange={e => set("stato", e.target.value)}>
-                    {ACCISE_STATUS_OPTS.map(s => <option key={s.id} value={s.id}>{s.label}</option>)}
-                  </select>
-                </div>
-              </div>
-              <div className="form-row form-row-2">
-                <div><label>Fecha envío</label><input type="date" value={form.dataInvio||""} onChange={e=>set("dataInvio",e.target.value)} /></div>
-                <div><label>Importe recibido (€)</label><input type="number" step="0.01" value={form.importoRicevuto||""} onChange={e=>set("importoRicevuto",e.target.value)} placeholder="0.00" /></div>
-              </div>
-              <div className="form-row">
-                <div><label>Notas</label><textarea value={form.note||""} onChange={e=>set("note",e.target.value)} rows={2} placeholder="Notas del expediente..." /></div>
-              </div>
-              <div style={{ display:"flex",gap:10,marginTop:4 }}>
-                <button className="btn-ghost" style={{ flex:1 }} onClick={() => setStatusModal(null)}>Cancelar</button>
-                <button className="btn-red" style={{ flex:1 }} onClick={() => saveStatus(statusModal.praticaId, form)}>Guardar</button>
-              </div>
-            </div>
-          </div>
-        );
-      })()}
+      {statusModal && <AcciseStatusModal
+        praticaId={statusModal.praticaId}
+        status={statusModal.status}
+        pratiche={pratiche}
+        onClose={() => setStatusModal(null)}
+        onSave={saveStatus}
+      />}
     </div>
   );
 }
