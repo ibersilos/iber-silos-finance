@@ -1117,7 +1117,6 @@ function AcciseGasolioTab({ data, persist }) {
           }
           const totLitriP = prat.reduce((s,p)=>s+(p.litrosDeclarados||0),0);
           const totBrutoP = prat.reduce((s,p)=>s+(p.importeBrutoEstimado||0),0);
-          const stOpt = getStatusOpt(prat[0]);
           return (
             <div key={paese.code} style={{
               background:"white",borderRadius:10,padding:"14px 14px 12px",
@@ -1127,27 +1126,33 @@ function AcciseGasolioTab({ data, persist }) {
               <div style={{ fontSize:22,marginBottom:6 }}>{paese.flag}</div>
               <div style={{ fontWeight:800,fontSize:13,marginBottom:2 }}>{paese.label}</div>
               <div style={{ fontFamily:"'IBM Plex Mono',monospace",fontWeight:700,fontSize:15,color:"#b8860b",marginBottom:4 }}>
-                {fmtN(totBrutoP)}
+                {totBrutoP > 0 ? fmtN(totBrutoP) : "—"}
               </div>
-              <div style={{ fontSize:10,color:"#999",fontFamily:"'IBM Plex Mono',monospace",marginBottom:8 }}>
-                {fmtL(totLitriP)} L
+              <div style={{ fontSize:10,color:"#999",fontFamily:"'IBM Plex Mono',monospace",marginBottom:6 }}>
+                {totLitriP > 0 ? fmtL(totLitriP)+" L" : "—"}
               </div>
-              <div style={{ marginBottom:8 }}>
-                <span style={{ fontSize:9,fontWeight:700,padding:"2px 7px",borderRadius:10,
-                  background:stOpt.bg, color:stOpt.color, letterSpacing:"0.05em" }}>
-                  {stOpt.label}
-                </span>
-              </div>
-              <div style={{ fontSize:9,color:"#3949ab",fontFamily:"'IBM Plex Mono',monospace",fontWeight:700,marginBottom:4 }}>
+              {/* Una riga per pratica con status + bottone */}
+              {prat.map(pr => {
+                const stOpt = getStatusOpt(pr);
+                return (
+                  <div key={pr.id} style={{ marginBottom:5,display:"flex",alignItems:"center",gap:5,flexWrap:"wrap" }}>
+                    <span style={{ fontSize:8,fontWeight:700,padding:"2px 6px",borderRadius:10,
+                      background:stOpt.bg,color:stOpt.color,letterSpacing:"0.04em",whiteSpace:"nowrap" }}>
+                      {pr.trimestre} · {stOpt.label}
+                    </span>
+                    <button className="btn-ghost" style={{ fontSize:8,padding:"2px 7px",marginLeft:"auto" }}
+                      onClick={() => setStatusModal({ praticaId: pr.id, status: getStatus(pr.id) })}>
+                      ✎
+                    </button>
+                  </div>
+                );
+              })}
+              <div style={{ fontSize:9,color:"#3949ab",fontFamily:"'IBM Plex Mono',monospace",fontWeight:700,marginTop:4,marginBottom:2 }}>
                 {paese.aliquota2026} €/kL
               </div>
-              <div style={{ fontSize:9,color:"#bbb",lineHeight:1.4,marginBottom:6 }}>
+              <div style={{ fontSize:9,color:"#bbb",lineHeight:1.4 }}>
                 {paese.normativa}
               </div>
-              <button className="btn-ghost" style={{ fontSize:9,padding:"3px 8px",width:"100%" }}
-                onClick={() => setStatusModal({ praticaId: prat[0].id, status: getStatus(prat[0].id) })}>
-                Actualizar estado
-              </button>
             </div>
           );
         })}
