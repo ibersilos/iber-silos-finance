@@ -625,6 +625,45 @@ const IVA_STATUS_OPTS = [
   { id:"received", label:"Ricevuta ✓",   color:"#28a745", bg:"#e8f5e9" },
 ];
 
+function IvaEsteraStatusModal({ paese, status, onClose, onSave }) {
+  const pi = PAESI_INFO.find(p => p.code === paese);
+  const [form, setForm] = useState({ ...status });
+  const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal" style={{ maxWidth:420 }} onClick={e => e.stopPropagation()}>
+        <div style={{ display:"flex",justifyContent:"space-between",marginBottom:20 }}>
+          <div className="modal-title">{pi?.flag} {pi?.label} — Stato pratica</div>
+          <button onClick={onClose} style={{ background:"none",fontSize:20,color:"#999" }}>×</button>
+        </div>
+        <div style={{ background:"#FAFAFA",borderRadius:8,padding:"10px 14px",marginBottom:16,fontSize:12,color:"#666" }}>
+          <strong>Portale:</strong> {pi?.portale}<br/>
+          <strong>Scadenza:</strong> {pi?.scadenza} · {pi?.normativa}
+        </div>
+        <div className="form-row">
+          <div>
+            <label>Stato pratica</label>
+            <select value={form.stato} onChange={e => set("stato", e.target.value)}>
+              {IVA_STATUS_OPTS.map(s => <option key={s.id} value={s.id}>{s.label}</option>)}
+            </select>
+          </div>
+        </div>
+        <div className="form-row form-row-2">
+          <div><label>Data invio</label><input type="date" value={form.dataInvio||""} onChange={e => set("dataInvio", e.target.value)} /></div>
+          <div><label>Importo ricevuto (€)</label><input type="number" step="0.01" value={form.importoRicevuto||""} onChange={e => set("importoRicevuto", e.target.value)} placeholder="0.00" /></div>
+        </div>
+        <div className="form-row">
+          <div><label>Note</label><textarea value={form.note||""} onChange={e => set("note", e.target.value)} rows={2} placeholder="Note pratica..." /></div>
+        </div>
+        <div style={{ display:"flex",gap:10,marginTop:4 }}>
+          <button className="btn-ghost" style={{ flex:1 }} onClick={onClose}>Cancelar</button>
+          <button className="btn-red" style={{ flex:1 }} onClick={() => onSave(paese, form)}>Guardar</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function IvaEsteraTab({ data, persist, ejercicio, EJERCICIOS, exportIvaEsteraCSV }) {
   const ej   = EJERCICIOS.find(e=>e.id===ejercicio) || EJERCICIOS[1];
   const anno = ej.from.slice(0,4);
@@ -897,45 +936,12 @@ function IvaEsteraTab({ data, persist, ejercicio, EJERCICIOS, exportIvaEsteraCSV
       </div>
 
       {/* Modal aggiorna stato pratica */}
-      {statusModal && (() => {
-        const pi = PAESI_INFO.find(p=>p.code===statusModal.paese);
-        const st = statusModal.status;
-        const [form, setForm] = useState({ ...st });
-        const set = (k,v) => setForm(f=>({...f,[k]:v}));
-        return (
-          <div className="modal-overlay" onClick={()=>setStatusModal(null)}>
-            <div className="modal" style={{maxWidth:420}} onClick={e=>e.stopPropagation()}>
-              <div style={{display:"flex",justifyContent:"space-between",marginBottom:20}}>
-                <div className="modal-title">{pi?.flag} {pi?.label} — Stato pratica</div>
-                <button onClick={()=>setStatusModal(null)} style={{background:"none",fontSize:20,color:"#999"}}>×</button>
-              </div>
-              <div style={{background:"#FAFAFA",borderRadius:8,padding:"10px 14px",marginBottom:16,fontSize:12,color:"#666"}}>
-                <strong>Portale:</strong> {pi?.portale}<br/>
-                <strong>Scadenza:</strong> {pi?.scadenza} · {pi?.normativa}
-              </div>
-              <div className="form-row">
-                <div>
-                  <label>Stato pratica</label>
-                  <select value={form.stato} onChange={e=>set("stato",e.target.value)}>
-                    {IVA_STATUS_OPTS.map(s=><option key={s.id} value={s.id}>{s.label}</option>)}
-                  </select>
-                </div>
-              </div>
-              <div className="form-row form-row-2">
-                <div><label>Data invio</label><input type="date" value={form.dataInvio||""} onChange={e=>set("dataInvio",e.target.value)} /></div>
-                <div><label>Importo ricevuto (€)</label><input type="number" step="0.01" value={form.importoRicevuto||""} onChange={e=>set("importoRicevuto",e.target.value)} placeholder="0.00" /></div>
-              </div>
-              <div className="form-row">
-                <div><label>Note</label><textarea value={form.note||""} onChange={e=>set("note",e.target.value)} rows={2} placeholder="Note pratica..." /></div>
-              </div>
-              <div style={{display:"flex",gap:10,marginTop:4}}>
-                <button className="btn-ghost" style={{flex:1}} onClick={()=>setStatusModal(null)}>Cancelar</button>
-                <button className="btn-red" style={{flex:1}} onClick={()=>saveStatus(statusModal.paese,form)}>Guardar</button>
-              </div>
-            </div>
-          </div>
-        );
-      })()}
+      {statusModal && <IvaEsteraStatusModal
+        paese={statusModal.paese}
+        status={statusModal.status}
+        onClose={() => setStatusModal(null)}
+        onSave={(paese, form) => saveStatus(paese, form)}
+      />}
     </div>
   );
 }
