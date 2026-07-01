@@ -2623,7 +2623,7 @@ function IbkrTab({ data, setIbkrModal, deleteIbkr, ibkrLive, onRefresh }) {
   const totalPLperc = totalInvested>0 && totalPL!==null ? totalPL/totalInvested*100 : null;
 
   const pacByMonth = {};
-  positions.filter(p=>p.type==="acquisto").forEach(p => { const m=p.date.slice(0,7); if(!pacByMonth[m]) pacByMonth[m]=0; pacByMonth[m]+=parseFloat(p.totalEur)||0; });
+  positions.filter(p=>p.type==="acquisto"&&p.date).forEach(p => { const m=p.date.slice(0,7); if(!pacByMonth[m]) pacByMonth[m]=0; pacByMonth[m]+=parseFloat(p.totalEur)||0; });
   const pacChart = Object.entries(pacByMonth).sort().map(([m,v])=>({ month:m.slice(5)+"/"+m.slice(2,4), investito:parseFloat(v.toFixed(2)), target:getPacAmount(m+"-15") }));
 
   return (

@@ -31,21 +31,31 @@ jobs:
       - name: Install yfinance
         run: pip install yfinance --quiet
 
-      - name: Fetch prices → dist/etf_prices.json
+      - name: Fetch prices → public/etf_prices.json
         run: python scripts/fetch_prices.py
 
-      - name: Deploy Pages (senza rebuild)
+      - name: Commit public/etf_prices.json [skip ci]
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add public/etf_prices.json
+          git diff --staged --quiet || git commit -m "chore: prezzi ETF $(date -u '+%Y-%m-%d %H:%M UTC') [skip ci]"
+          git push
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build app (public/etf_prices.json → dist/)
+        run: npm run build
+
+      - name: Deploy Pages
         uses: actions/upload-pages-artifact@v3
         with:
           path: './dist'
 
       - name: Deploy to GitHub Pages
         uses: actions/deploy-pages@v4
-
-      - name: Commit dist/etf_prices.json [skip ci]
-        run: |
-          git config user.name  "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add dist/etf_prices.json
-          git diff --staged --quiet || git commit -m "chore: prezzi ETF $(date -u '+%Y-%m-%d %H:%M UTC') [skip ci]"
-          git push
