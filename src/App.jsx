@@ -1390,12 +1390,17 @@ export default function IberSilosApp() {
   }, [data, persist]);
 
   const [ibkrLive, setIbkrLive] = useState(null); // { VWCE:{price,change_pct}, ..., _updated }
-  useEffect(() => {
+  const fetchIbkrPrices = useCallback(() => {
     fetch('/iber-silos-finance/etf_prices.json?t=' + Date.now())
       .then(r => r.json())
       .then(d => { if (d._updated) setIbkrLive(d); })
       .catch(() => {});
   }, []);
+  useEffect(() => {
+    fetchIbkrPrices();
+    const interval = setInterval(fetchIbkrPrices, 15 * 60 * 1000);
+    return () => clearInterval(interval);
+  }, [fetchIbkrPrices]);
 
 
   const saveIbkr = (pos) => {
@@ -1802,7 +1807,7 @@ export default function IberSilosApp() {
             </div>
           )}
 
-          {tab==="ibkr" && <IbkrTab data={data} setIbkrModal={setIbkrModal} deleteIbkr={deleteIbkr} ibkrLive={ibkrLive} />}
+          {tab==="ibkr" && <IbkrTab data={data} setIbkrModal={setIbkrModal} deleteIbkr={deleteIbkr} ibkrLive={ibkrLive} onRefresh={fetchIbkrPrices} />}
           {tab==="contabilidad" && <ContabilidadTab data={data} persist={persist} contabView={contabView} setContabView={setContabView} mayorCuenta={mayorCuenta} setMayorCuenta={setMayorCuenta} setAsientoModal={setAsientoModal} deleteAsiento={deleteAsiento} exportContabCSV={exportContabCSV} />}
           {tab==="iva_estera" && <IvaEsteraTab data={data} persist={persist} ejercicio={ejercicio} EJERCICIOS={EJERCICIOS} exportIvaEsteraCSV={exportIvaEsteraCSV} />}
           {tab==="accise_gasolio" && <AcciseGasolioTab data={data} persist={persist} />}
@@ -2528,7 +2533,15 @@ function IvaModal({ data, metrics, ejercicio, EJERCICIOS, exportIvaEsteraCSV, on
 }
 
 
-function IbkrTab({ data, setIbkrModal, deleteIbkr, ibkrLive }) {
+function IbkrTab({ data, setIbkrModal, deleteIbkr, ibkrLive, onRefresh }) {
+  const [nextRefresh, setNextRefresh] = React.useState(15 * 60);
+  React.useEffect(() => {
+    setNextRefresh(15 * 60);
+    const tick = setInterval(() => setNextRefresh(s => s <= 1 ? 15 * 60 : s - 1), 1000);
+    return () => clearInterval(tick);
+  }, [ibkrLive]);
+  const mm = String(Math.floor(nextRefresh / 60)).padStart(2,"0");
+  const ss = String(nextRefresh % 60).padStart(2,"0");
   const positions = data.ibkrPositions || [];
   // Prezzi dal JSON aggiornato dalla GitHub Action
   const ibkrPrices = {};
@@ -2559,8 +2572,9 @@ function IbkrTab({ data, setIbkrModal, deleteIbkr, ibkrLive }) {
         <div>
           <div className="section-title">IBKR SL — Portfolio Iber-Silos SLU</div>
           {ibkrLive?._updated
-            ? <div style={{ fontSize:10,color:"#28a745",marginTop:2 }}>✓ Prezzi aggiornati: {new Date(ibkrLive._updated).toLocaleString("it-IT",{day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"})}</div>
+            ? <div style={{ fontSize:10,color:"#28a745",marginTop:2 }}>✓ Prezzi aggiornati: {new Date(ibkrLive._updated).toLocaleString("it-IT",{day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"})} · prossimo refresh {mm}:{ss}</div>
             : <div style={{ fontSize:10,color:"#bbb",marginTop:2 }}>Prezzi manuali — aggiornamento automatico 18:30 lun-ven</div>}
+          <button onClick={onRefresh} style={{ marginTop:4, fontSize:10, background:"none", border:"1px solid #ddd", borderRadius:4, padding:"2px 8px", cursor:"pointer", color:"#555" }}>↻ Refresh ora</button>
         </div>
         <button className="btn-ghost" style={{ fontSize:12 }} onClick={() => {
           const rows = [["Data","Tipo","Ticker","Shares","Prezzo (€)","Commissioni (€)","Totale (€)","Note"]];
