@@ -2958,8 +2958,18 @@ function InvoiceTable({ invoices, onEdit, onDelete }) {
                 (parseFloat(inv.ivaAmount) > 0) &&
                 (!inv.paisIvaOrigen || inv.paisIvaOrigen === "ES") &&
                 !(inv.supplier||"").match(/La Clau|Gestrams|Poligon|Brochette|Ruta|Reconquista|Vegallana|Lacamart|Doyouspain/i);
+              const ivaEsteraIncomplete =
+                inv.type === "ricevuta" &&
+                inv.paisIvaOrigen && inv.paisIvaOrigen !== "ES" &&
+                (parseFloat(inv.ivaEsteraBase) || 0) > 0 &&
+                !(parseFloat(inv.ivaEsteraAmount) > 0);
+              const ivaEsteraOk =
+                inv.type === "ricevuta" &&
+                inv.paisIvaOrigen && inv.paisIvaOrigen !== "ES" &&
+                (parseFloat(inv.ivaEsteraAmount) || 0) > 0;
+              const rowBg = needsIvaClassification ? "#fffde7" : ivaEsteraIncomplete ? "#fff3e0" : undefined;
               return (
-              <tr key={inv.id} style={{ background: needsIvaClassification ? "#fffde7" : undefined }}>
+              <tr key={inv.id} style={{ background: rowBg }}>
                 <td style={{ color:"#E30613",fontWeight:700,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap" }}>
                   {inv.number||"—"}
                   {needsIvaClassification && <span title="IVA estera da classificare" style={{ marginLeft:4,fontSize:11,cursor:"help" }}>⚠️</span>}
@@ -2969,8 +2979,21 @@ function InvoiceTable({ invoices, onEdit, onDelete }) {
                 <td><span className={`badge ${inv.type==="emessa"?"badge-green":"badge-yellow"}`}>{inv.type}</span></td>
                 <td style={{ overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",fontWeight:600,fontSize:12 }}>{inv.type==="emessa"?inv.client:inv.supplier}</td>
                 <td style={{ textAlign:"right",fontWeight:600,fontFamily:"'IBM Plex Mono',monospace",fontSize:12 }}>{fmt(inv.netAmount)}</td>
-                <td style={{ color:"#bbb",fontSize:11,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap" }}>
-                  {inv.ivaType}{inv.paisIvaOrigen && inv.paisIvaOrigen!=="ES" && <span style={{ marginLeft:3 }}>{IVA_FLAGS[inv.paisIvaOrigen]||""}</span>}
+                <td style={{ fontSize:11,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap" }}>
+                  <span style={{ color:"#bbb" }}>{inv.ivaType}</span>
+                  {ivaEsteraOk && (
+                    <span title={`IVA ${inv.paisIvaOrigen} recuperabile: ${fmt(inv.ivaEsteraAmount)}`} style={{ marginLeft:4,fontWeight:700,color:"#b8860b",cursor:"help" }}>
+                      {IVA_FLAGS[inv.paisIvaOrigen]} {fmt(inv.ivaEsteraAmount)}
+                    </span>
+                  )}
+                  {ivaEsteraIncomplete && (
+                    <span title="IVA estera: base inserita ma importo recuperabile = 0. Apri e correggi." style={{ marginLeft:4,color:"#E30613",fontWeight:700,cursor:"help" }}>
+                      {IVA_FLAGS[inv.paisIvaOrigen]||"🌍"} ⚠ importo mancante
+                    </span>
+                  )}
+                  {needsIvaClassification && !ivaEsteraOk && (
+                    <span style={{ marginLeft:4,color:"#b8860b",fontSize:10 }}>classifica paese</span>
+                  )}
                 </td>
                 <td style={{ textAlign:"right",fontWeight:700,fontFamily:"'IBM Plex Mono',monospace",fontSize:12 }}>{fmt(inv.grossAmount)}</td>
                 <td><StatusBadge status={inv.status}/></td>
@@ -3181,6 +3204,14 @@ function InvoiceModal({ inv, onSave, onClose }) {
                   ? <span>IVA recuperabile via <strong>Hacienda → portale UE</strong> · scadenza <strong>30/09 anno successivo</strong></span>
                   : <span style={{ color:"#bbb" }}>Inserisci base e aliquota per calcolare il recupero</span>
                 }
+              </div>
+            )}
+            {/* Warning IVA estera incompleta: base inserita ma importo = 0 */}
+            {form.paisIvaOrigen && form.paisIvaOrigen !== "ES" &&
+             (parseFloat(form.ivaEsteraBase)||0) > 0 &&
+             !(parseFloat(form.ivaEsteraAmount) > 0) && (
+              <div style={{ marginTop:8, background:"#ffebee", border:"1px solid #ef9a9a", borderRadius:6, padding:"8px 12px", fontSize:11, color:"#c62828", display:"flex", alignItems:"center", gap:6 }}>
+                ⚠ <strong>IVA estera incompleta:</strong> base inserita (€{form.ivaEsteraBase}) ma importo recuperabile = 0. Seleziona l'aliquota o inserisci l'importo manualmente.
               </div>
             )}
             {form.paisIvaOrigen === "ES" && (
