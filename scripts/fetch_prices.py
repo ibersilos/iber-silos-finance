@@ -32,6 +32,6 @@ def fetch():
 if __name__ == "__main__":
     data = fetch()
     print(json.dumps(data, indent=2))
-    with open("public/etf_prices.json", "w") as f:
+    with open("dist/etf_prices.json", "w") as f:
         json.dump(data, f, indent=2)
-    print("Salvato in public/etf_prices.json")
+    print("Salvato in dist/etf_prices.json")
