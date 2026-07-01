@@ -195,7 +195,7 @@ function buildForecast(invoices, movements) {
   const events = [];
   invoices.forEach(inv => {
     if (inv.status === "riconciliata" || inv.status === "annullata") return;
-    const due = new Date(inv.dueDate || addDays(inv.date, 30));
+    const due = new Date(inv.dueDate || (inv.date ? addDays(inv.date, 30) : addDays(today(), 30)));
     const diff = Math.ceil((due - baseDate) / 86400000);
     if (diff < -5 || diff > 90) return;
     events.push({ day: Math.max(0, diff), amount: inv.type === "emessa" ? (parseFloat(inv.grossAmount)||0) : -(parseFloat(inv.grossAmount)||0) });
@@ -732,7 +732,7 @@ function IvaEsteraTab({ data, persist, ejercicio, EJERCICIOS, exportIvaEsteraCSV
       if (filterPaese !== "ALL" && inv.paisIvaOrigen !== filterPaese) return false;
       return true;
     });
-    return list.sort((a,b)=>(b.date||"").localeCompare(a.date||""));
+    return list.sort((a,b)=>(b.fechaOperacion||b.date||"").localeCompare(a.fechaOperacion||a.date||""));
   }, [data.invoices, ejercicio, filterPaese]);
 
   const fmtN = v => new Intl.NumberFormat("es-ES",{style:"currency",currency:"EUR",minimumFractionDigits:2}).format(v||0);
@@ -1428,7 +1428,7 @@ export default function IberSilosApp() {
 
   const [ibkrLive, setIbkrLive] = useState(null); // { VWCE:{price,change_pct}, ..., _updated }
   const fetchIbkrPrices = useCallback(() => {
-    fetch('/iber-silos-finance/etf_prices.json?t=' + Date.now())
+    fetch(import.meta.env.BASE_URL + 'etf_prices.json?t=' + Date.now())
       .then(r => r.json())
       .then(d => { if (d._updated) setIbkrLive(d); })
       .catch(() => {});
@@ -1541,7 +1541,7 @@ export default function IberSilosApp() {
 
   const exportContabCSV = () => {
     const rows = [["Numero","Fecha","Concepto","Cuenta","Nombre Cuenta","Debe","Haber"]];
-    (data.asientos||[]).forEach(a => a.lineas.forEach(l => rows.push([a.numero,a.fecha,a.concepto,l.cuenta,ACC_MAP[l.cuenta]?.name||"",l.debe||"0",l.haber||"0"])));
+    (data.asientos||[]).forEach(a => (a.lineas||[]).forEach(l => rows.push([a.numero,a.fecha,a.concepto,l.cuenta,ACC_MAP[l.cuenta]?.name||"",l.debe||"0",l.haber||"0"])));
     const csv = rows.map(r => r.map(v=>`"${String(v).replace(/"/g,'""')}"`).join(",")).join("\n");
     const blob = new Blob([csv],{type:"text/csv;charset=utf-8;"}); const a=document.createElement("a"); a.href=URL.createObjectURL(blob); a.download=`libro-diario-${today()}.csv`; a.click();
     showToast("Libro Diario exportado");
@@ -1583,7 +1583,7 @@ export default function IberSilosApp() {
     const ej = ejFound || EJERCICIOS.find(e=>e.id==="EF2") || EJERCICIOS[1];
     const anno = ejFound ? ej.from.slice(0,4) : new Date().getFullYear().toString();
     const mesiMap = { T1:[1,2,3], T2:[4,5,6], T3:[7,8,9], T4:[10,11,12] };
-    const mesi = mesiMap[trimestre];
+    const mesi = mesiMap[trimestre]; if (!mesi) { showToast("Trimestre non valido: " + trimestre, "err"); return; }
     const scadenzeMap = { T1:`30/04/${anno}`, T2:`31/07/${anno}`, T3:`31/10/${anno}`, T4:`31/01/${parseInt(anno)+1}` };
     const PAESI_UE = ["IT","FR","DE","AT","BE"];
     const fatture = data.invoices.filter(inv => {
@@ -2088,7 +2088,7 @@ const ej = EJERCICIOS.find(e=>e.id===ejercicio)||EJERCICIOS[2];
         });
         const rows = Object.values(bySupp).sort((a,b)=>b.totale-a.totale).slice(0,6);
         if (!rows.length) return null;
-        const totale = rows.reduce((s,r)=>s+r.totale,0);
+        const totale = rows.reduce((s,r)=>s+r.totale,0); if (!totale) return null;
         return (
           <div className="card">
             <div style={{ fontSize:10,fontWeight:700,letterSpacing:"1.5px",textTransform:"uppercase",color:"#bbb",marginBottom:14 }}>
@@ -2242,13 +2242,13 @@ const ej = EJERCICIOS.find(e=>e.id===ejercicio)||EJERCICIOS[2];
           if(mov) movMap[inv.id]=mov.date;
         }});
         const dsoCalcs = emesse
-          .filter(i=>i.status==="riconciliata" && movMap[i.id])
+          .filter(i=>i.status==="riconciliata" && movMap[i.id] && i.date)
           .map(i=>Math.max(0, Math.round((new Date(movMap[i.id])-new Date(i.date))/86400000)));
         const dso = dsoCalcs.length ? Math.round(dsoCalcs.reduce((a,b)=>a+b,0)/dsoCalcs.length) : null;
 
         // DPO: media giorni tra data fattura ricevuta e data pagamento
         const dpoCalcs = ricevute
-          .filter(i=>i.status==="riconciliata" && movMap[i.id])
+          .filter(i=>i.status==="riconciliata" && movMap[i.id] && i.date)
           .map(i=>Math.max(0, Math.round((new Date(movMap[i.id])-new Date(i.date))/86400000)));
         const dpo = dpoCalcs.length ? Math.round(dpoCalcs.reduce((a,b)=>a+b,0)/dpoCalcs.length) : null;
 
@@ -2657,7 +2657,7 @@ function IbkrTab({ data, setIbkrModal, deleteIbkr, ibkrLive, onRefresh }) {
         </div>
         <button className="btn-ghost" style={{ fontSize:12 }} onClick={() => {
           const rows = [["Data","Tipo","Ticker","Shares","Prezzo (€)","Commissioni (€)","Totale (€)","Note"]];
-          [...positions].sort((a,b)=>a.date.localeCompare(b.date)).forEach(p => {
+          [...positions].sort((a,b)=>(a.date||"").localeCompare(b.date||"")).forEach(p => {
             rows.push([p.date, p.type==="acquisto"?"Acquisto":"Vendita", p.ticker,
               parseFloat(p.shares||0).toFixed(4), parseFloat(p.priceEur||0).toFixed(2),
               parseFloat(p.fees||0).toFixed(2), parseFloat(p.totalEur||0).toFixed(2), p.notes||""]);
@@ -2780,7 +2780,7 @@ function ContabilidadTab({ data, persist, contabView, setContabView, mayorCuenta
   const currentYear = new Date().getFullYear();
   const mayorSaldos = {};
   PGC_ACCOUNTS.forEach(a => { mayorSaldos[a.code]={ debe:0, haber:0, movs:[] }; });
-  asientos.forEach(asi => asi.lineas.forEach(l => {
+  asientos.forEach(asi => (asi.lineas||[]).forEach(l => {
     if (!mayorSaldos[l.cuenta]) mayorSaldos[l.cuenta]={ debe:0, haber:0, movs:[] };
     mayorSaldos[l.cuenta].debe += parseFloat(l.debe)||0;
     mayorSaldos[l.cuenta].haber += parseFloat(l.haber)||0;
@@ -3151,6 +3151,11 @@ function InvoiceModal({ inv, onSave, onClose }) {
       updated.ivaEsteraAmount = paese !== "ES" ? parseFloat((base * rate).toFixed(2)) : 0;
     }
 
+    // Se si cambia ivaEsteraRate manualmente, ricalcola l'amount
+    if (k==="ivaEsteraRate") {
+      const base = parseFloat(f.ivaEsteraBase) || 0;
+      updated.ivaEsteraAmount = parseFloat((base * (parseFloat(v)||0)).toFixed(2));
+    }
     // Se si cambia ivaEsteraAmount manualmente, ricalcola il rate
     if (k==="ivaEsteraAmount") {
       const base = parseFloat(f.ivaEsteraBase) || 0;
@@ -3183,7 +3188,7 @@ function InvoiceModal({ inv, onSave, onClose }) {
 
         {/* Numero + data */}
         <div className="form-row form-row-2">
-          <div><label>N° Factura</label><input value={form.number} onChange={e=>set("number",e.target.value)} /></div>
+          <div><label>N° Factura</label><input value={form.number||""} onChange={e=>set("number",e.target.value)} /></div>
           <div><label>Fecha</label><input type="date" value={form.date} onChange={e=>set("date",e.target.value)} /></div>
         </div>
 
@@ -3374,7 +3379,7 @@ function IbkrForm({ pos, onSave, onClose }) {
 }
 
 function AsientoModal({ asiento, onSave, onClose }) {
-  const [form, setForm] = useState({ ...asiento, lineas: asiento.lineas.map(l=>({...l})) });
+  const [form, setForm] = useState({ ...asiento, lineas: (asiento.lineas||[{cuenta:"",debe:"",haber:"",descripcion:""},{cuenta:"",debe:"",haber:"",descripcion:""}]).map(l=>({...l})) });
   const setField = (k,v) => setForm(f=>({...f,[k]:v}));
   const setLinea = (i,k,v) => setForm(f=>({ ...f, lineas: f.lineas.map((l,li)=>li===i?{...l,[k]:v}:l) }));
   const addLinea = () => setForm(f=>({...f,lineas:[...f.lineas,{cuenta:"",debe:"",haber:"",descripcion:""}]}));
