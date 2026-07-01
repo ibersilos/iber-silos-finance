@@ -1645,7 +1645,8 @@ export default function IberSilosApp() {
     const ivaRep = emesse.reduce((s,i)=>s+(parseFloat(i.ivaAmount)||0),0);
     const ivaCredito = ivaSop - ivaRep;
     const ivaDevol = data.movements.filter(m=>m.isAeatRefund===true||(m.type==="entrata"&&/AEAT.*(IVA|DEVOLUCI[OÓ]N|REDEME|303)/i.test(m.description||""))).reduce((s,m)=>s+(parseFloat(m.amount)||0),0);
-    return { fatturato, costi, margine:fatturato-costi, creditiAperti, debitiAperti, liquidita, marginePerc:fatturato>0?(fatturato-costi)/fatturato*100:0, ivaSop, ivaRep, ivaCredito, ivaDevol };
+    const ivaEsteraRecuperata = data.movements.filter(m=>m.isIvaEsteraRefund===true||(m.type==="entrata"&&/rimborso.*(iva|estera)|iva.*(estera|IT|FR|AT|BE).*(rimb|recup|refund)/i.test(m.description||""))).reduce((s,m)=>s+(parseFloat(m.amount)||0),0);
+    return { fatturato, costi, margine:fatturato-costi, creditiAperti, debitiAperti, liquidita, marginePerc:fatturato>0?(fatturato-costi)/fatturato*100:0, ivaSop, ivaRep, ivaCredito, ivaDevol, ivaEsteraRecuperata };
   }, [data.invoices, data.movements, ejercicio]);
 
   const forecastInvoices = useMemo(() => {
@@ -2022,7 +2023,7 @@ function IvaEsteraExportBtn({ exportIvaEsteraCSV, ejercicio }) {
 
 // ── CARD IVA RIEPILOGO (solo totali — dashboard) ──────────────────────────────
 function IvaResumenCard({ metrics, data, ejercicio, EJERCICIOS, onDetail }) {
-  const { ivaSop, ivaRep, ivaCredito, ivaDevol } = metrics;
+  const { ivaSop, ivaRep, ivaCredito, ivaDevol, ivaEsteraRecuperata } = metrics;
   const isCredito = ivaCredito >= 0;
 
   // Calcola totale IVA estera recuperabile per l'esercizio corrente
@@ -2042,7 +2043,7 @@ function IvaResumenCard({ metrics, data, ejercicio, EJERCICIOS, onDetail }) {
     <div className="card" style={{ marginBottom:16, borderLeft:"4px solid #3949ab" }}>
       <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14 }}>
         <div style={{ fontSize:10,fontWeight:700,letterSpacing:"1.5px",textTransform:"uppercase",color:"#bbb" }}>
-          🇪🇸 IVA España &amp; 🇮🇹🇫🇷 IVA Estera
+          🇪🇸 IVA España &amp; 🇮🇹🇫🇷 IVA Exterior
         </div>
         <button className="btn-ghost" style={{ fontSize:11 }} onClick={onDetail}>📊 Detalle completo →</button>
       </div>
@@ -2052,16 +2053,16 @@ function IvaResumenCard({ metrics, data, ejercicio, EJERCICIOS, onDetail }) {
           <div style={{ fontSize:24,fontWeight:900,color:isCredito?"#28a745":"#E30613" }}>{fmt(Math.abs(ivaCredito))}</div>
           <div style={{ fontSize:10,color:isCredito?"#28a745":"#E30613",marginTop:2,fontWeight:700 }}>{isCredito?"✓ crédito AEAT":"⚠ deuda AEAT"}</div>
         </div>
-        <div style={{ textAlign:"center",padding:"10px",background:"#e8f5e9",borderRadius:8,border:"1.5px solid #a5d6a7" }}>
-          <div style={{ fontSize:10,color:"#bbb",fontWeight:700,textTransform:"uppercase",letterSpacing:"0.1em",marginBottom:4 }}>REDEME devuelto</div>
-          <div style={{ fontSize:24,fontWeight:900,color:"#28a745" }}>{fmt(ivaDevol)}</div>
-          <div style={{ fontSize:10,color:"#bbb",marginTop:2 }}>rimborso ricevuto</div>
+        <div style={{ textAlign:"center",padding:"10px",background:ivaEsteraRecuperata>0?"#e8f5e9":"#f5f5f5",borderRadius:8,border:`1.5px solid ${ivaEsteraRecuperata>0?"#a5d6a7":"#ddd"}` }}>
+          <div style={{ fontSize:10,color:"#bbb",fontWeight:700,textTransform:"uppercase",letterSpacing:"0.1em",marginBottom:4 }}>IVA Exterior recuperada</div>
+          <div style={{ fontSize:24,fontWeight:900,color:ivaEsteraRecuperata>0?"#28a745":"#aaa" }}>{fmt(ivaEsteraRecuperata)}</div>
+          <div style={{ fontSize:10,color:ivaEsteraRecuperata>0?"#28a745":"#bbb",marginTop:2,fontWeight:700 }}>{ivaEsteraRecuperata>0?"✓ devolución recibida":"pendiente de devolución"}</div>
         </div>
         <div style={{ textAlign:"center",padding:"10px",background:totEstera>=IVA_ESTERA_SOGLIA_ANNUA?"#e8f5e9":"#fffde7",borderRadius:8,border:`1.5px solid ${totEstera>=IVA_ESTERA_SOGLIA_ANNUA?"#a5d6a7":"#ffe082"}` }}>
-          <div style={{ fontSize:10,color:"#bbb",fontWeight:700,textTransform:"uppercase",letterSpacing:"0.1em",marginBottom:4 }}>IVA Estera recuperabile</div>
+          <div style={{ fontSize:10,color:"#bbb",fontWeight:700,textTransform:"uppercase",letterSpacing:"0.1em",marginBottom:4 }}>IVA Exterior recuperable</div>
           <div style={{ fontSize:24,fontWeight:900,color:totEstera>=IVA_ESTERA_SOGLIA_ANNUA?"#28a745":"#b8860b" }}>{fmt(totEstera)}</div>
           <div style={{ fontSize:10,color:totEstera>=IVA_ESTERA_SOGLIA_ANNUA?"#28a745":"#b8860b",marginTop:2,fontWeight:700 }}>
-            {totEstera>=IVA_ESTERA_SOGLIA_ANNUA?"✓ soglia annua ok":"⚠ sotto soglia €50"}
+            {totEstera>=IVA_ESTERA_SOGLIA_ANNUA?"✓ umbral anual ✓":"⚠ bajo umbral €50"}
           </div>
         </div>
       </div>
@@ -2432,7 +2433,7 @@ function IvaModal({ data, metrics, ejercicio, EJERCICIOS, exportIvaEsteraCSV, on
         {/* Tabs */}
         <div style={{ display:"flex",borderBottom:"1.5px solid #F0F0F0",marginBottom:20,marginTop:12 }}>
           <button style={tabStyle("es")} onClick={()=>setActiveTab("es")}>🇪🇸 IVA España 303 / REDEME</button>
-          <button style={tabStyle("estera")} onClick={()=>setActiveTab("estera")}>🇮🇹🇫🇷 IVA Estera UE</button>
+          <button style={tabStyle("estera")} onClick={()=>setActiveTab("estera")}>🇮🇹🇫🇷 IVA Exterior UE</button>
         </div>
 
         {/* ── TAB IVA ES ── */}
