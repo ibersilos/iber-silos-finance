@@ -1509,8 +1509,9 @@ export default function IberSilosApp() {
   };
 
   const exportIvaEsteraCSV = (trimestre) => {
-    const ej = EJERCICIOS.find(e=>e.id===ejercicio)||EJERCICIOS[1];
-    const anno = ej.from.slice(0,4);
+    const ejFound = EJERCICIOS.find(e=>e.id===ejercicio&&e.id!=="todos");
+    const ej = ejFound || EJERCICIOS.find(e=>e.id==="EF2") || EJERCICIOS[1];
+    const anno = ejFound ? ej.from.slice(0,4) : new Date().getFullYear().toString();
     const mesiMap = { T1:[1,2,3], T2:[4,5,6], T3:[7,8,9], T4:[10,11,12] };
     const mesi = mesiMap[trimestre];
     const scadenzeMap = { T1:`30/04/${anno}`, T2:`31/07/${anno}`, T3:`31/10/${anno}`, T4:`31/01/${parseInt(anno)+1}` };
@@ -1577,7 +1578,12 @@ export default function IberSilosApp() {
     return { fatturato, costi, margine:fatturato-costi, creditiAperti, debitiAperti, liquidita, marginePerc:fatturato>0?(fatturato-costi)/fatturato*100:0, ivaSop, ivaRep, ivaCredito, ivaDevol };
   }, [data.invoices, data.movements, ejercicio]);
 
-  const forecast = useMemo(() => buildForecast(data.invoices, data.movements), [data.invoices, data.movements]);
+  const forecastInvoices = useMemo(() => {
+    const ej = EJERCICIOS.find(e => e.id === ejercicio);
+    if (!ej || ej.id === "todos") return data.invoices;
+    return data.invoices.filter(i => { const d = i.fechaOperacion || i.date || ""; return d >= ej.from && d <= ej.to; });
+  }, [data.invoices, ejercicio]);
+  const forecast = useMemo(() => buildForecast(forecastInvoices, data.movements), [forecastInvoices, data.movements]);
 
   const pacSummary = useMemo(() => {
     const positions = data.ibkrPositions || [];
@@ -1787,8 +1793,8 @@ export default function IberSilosApp() {
               <div className="section-title" style={{ marginBottom:20 }}>Forecast Cash Flow — 90 días</div>
               <div style={{ display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:14, marginBottom:20 }}>
                 <div className="kpi-card blue"><div className="kpi-label">Liquidez actual</div><div className="kpi-value" style={{ color:"#3949ab" }}>{fmt(metrics.liquidita)}</div></div>
-                <div className="kpi-card green"><div className="kpi-label">Cobros esperados 90d</div><div className="kpi-value" style={{ color:"#28a745" }}>{fmt(data.invoices.filter(i=>i.type==="emessa"&&i.status==="aperta").reduce((s,i)=>s+(parseFloat(i.grossAmount)||0),0))}</div></div>
-                <div className="kpi-card"><div className="kpi-label">Pagos esperados 90d</div><div className="kpi-value" style={{ color:"#E30613" }}>{fmt(data.invoices.filter(i=>i.type==="ricevuta"&&i.status==="aperta").reduce((s,i)=>s+(parseFloat(i.grossAmount)||0),0))}</div></div>
+                <div className="kpi-card green"><div className="kpi-label">Cobros esperados 90d</div><div className="kpi-value" style={{ color:"#28a745" }}>{fmt(forecastInvoices.filter(i=>i.type==="emessa"&&i.status==="aperta").reduce((s,i)=>s+(parseFloat(i.grossAmount)||0),0))}</div></div>
+                <div className="kpi-card"><div className="kpi-label">Pagos esperados 90d</div><div className="kpi-value" style={{ color:"#E30613" }}>{fmt(forecastInvoices.filter(i=>i.type==="ricevuta"&&i.status==="aperta").reduce((s,i)=>s+(parseFloat(i.grossAmount)||0),0))}</div></div>
               </div>
               <div className="card" style={{ marginBottom:16 }}>
                 <div style={{ fontSize:10,fontWeight:700,letterSpacing:"1.5px",textTransform:"uppercase",color:"#bbb",marginBottom:14 }}>Proyección saldo</div>
