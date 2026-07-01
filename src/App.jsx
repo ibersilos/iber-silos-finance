@@ -1330,6 +1330,23 @@ function AcciseGasolioTab({ data, persist }) {
   );
 }
 
+class TabErrorBoundary extends React.Component {
+  constructor(props) { super(props); this.state = { hasError: false, error: null }; }
+  static getDerivedStateFromError(e) { return { hasError: true, error: e }; }
+  componentDidUpdate(prev) { if (prev.tabKey !== this.props.tabKey) this.setState({ hasError: false, error: null }); }
+  render() {
+    if (this.state.hasError) return (
+      <div style={{ padding:40, textAlign:"center" }}>
+        <div style={{ fontSize:32, marginBottom:12 }}>⚠️</div>
+        <div style={{ fontSize:15, fontWeight:700, color:"#E30613", marginBottom:8 }}>Errore nel caricamento di questa sezione</div>
+        <div style={{ fontSize:12, color:"#999", fontFamily:"'IBM Plex Mono',monospace", marginBottom:20, maxWidth:480, margin:"0 auto 20px" }}>{this.state.error?.message}</div>
+        <button className="btn-red" onClick={()=>this.setState({hasError:false,error:null})}>↺ Riprova</button>
+      </div>
+    );
+    return this.props.children;
+  }
+}
+
 export default function IberSilosApp() {
   const [authenticated, setAuthenticated] = useState(() => {
     const token = sessionStorage.getItem('ibs_auth');
@@ -1785,6 +1802,7 @@ export default function IberSilosApp() {
         </aside>
 
         <div style={{ flex:1, overflow:"auto", padding:24, scrollBehavior:"smooth" }}>
+          <TabErrorBoundary tabKey={tab}>
           {tab==="dashboard" && <DashboardTab data={data} metrics={metrics} forecast={forecast} ejercicio={ejercicio} EJERCICIOS={EJERCICIOS} setIvaModal={setIvaModal} exportIvaEsteraCSV={exportIvaEsteraCSV} />}
 
           {tab==="fatture" && (
@@ -1871,6 +1889,7 @@ export default function IberSilosApp() {
           {tab==="contabilidad" && <ContabilidadTab data={data} persist={persist} contabView={contabView} setContabView={setContabView} mayorCuenta={mayorCuenta} setMayorCuenta={setMayorCuenta} setAsientoModal={setAsientoModal} deleteAsiento={deleteAsiento} exportContabCSV={exportContabCSV} />}
           {tab==="iva_estera" && <IvaEsteraTab data={data} persist={persist} ejercicio={ejercicio} EJERCICIOS={EJERCICIOS} exportIvaEsteraCSV={exportIvaEsteraCSV} />}
           {tab==="accise_gasolio" && <AcciseGasolioTab data={data} persist={persist} />}
+          </TabErrorBoundary>
         </div>
       </div>
 
