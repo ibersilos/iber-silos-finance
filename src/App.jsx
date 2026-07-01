@@ -166,18 +166,23 @@ function saveData(data, onError) {
 // ── RECONCILIATION ────────────────────────────────────────────────────────────
 function autoReconcile(movements, invoices) {
   const updated = movements.map(m => ({ ...m }));
+  const claimedIds = new Set(updated.filter(m => m.reconciled && m.invoiceId).map(m => m.invoiceId));
   updated.forEach(mov => {
     if (mov.reconciled || mov.invoiceId) return;
     const amt = Math.abs(parseFloat(mov.amount) || 0);
     const movDate = new Date(mov.date);
     const candidates = invoices.filter(inv => {
+      if (claimedIds.has(inv.id)) return false;
       if (mov.type === "entrata" && inv.type !== "emessa") return false;
       if (mov.type === "uscita" && inv.type !== "ricevuta") return false;
       if (inv.status === "riconciliata") return false;
       if (Math.abs((parseFloat(inv.grossAmount) || 0) - amt) > 0.05) return false;
       return Math.abs((new Date(inv.dueDate || inv.date) - movDate) / 86400000) <= 10;
     });
-    if (candidates.length === 1) { mov.invoiceId = candidates[0].id; mov.reconciled = true; mov._autoMatch = true; }
+    if (candidates.length === 1) {
+      mov.invoiceId = candidates[0].id; mov.reconciled = true; mov._autoMatch = true;
+      claimedIds.add(candidates[0].id);
+    }
   });
   return updated;
 }
@@ -732,13 +737,28 @@ function IvaEsteraTab({ data, persist, ejercicio, EJERCICIOS, exportIvaEsteraCSV
 
   const fmtN = v => new Intl.NumberFormat("es-ES",{style:"currency",currency:"EUR",minimumFractionDigits:2}).format(v||0);
 
+  const scadAnno = parseInt(anno) + 1;
+  const scadDate = new Date(`${scadAnno}-09-30`);
+  const daysLeft = Math.ceil((scadDate - new Date()) / 86400000);
+  const scadColor = daysLeft <= 60 ? "#E30613" : daysLeft <= 180 ? "#b8860b" : "#28a745";
+
   return (
     <div>
       {/* Header */}
-      <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20 }}>
+      <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12 }}>
         <div className="section-title">Recupero IVA Estera — Dir. 2008/9/CE</div>
         <div style={{ fontSize:11,color:"#999",fontFamily:"'IBM Plex Mono',monospace" }}>
           Soglia annuale: <strong style={{color:"#1A1A1A"}}>€{IVA_ESTERA_SOGLIA_ANNUA}</strong> · Soglia trimestrale: <strong style={{color:"#1A1A1A"}}>€{IVA_ESTERA_SOGLIA_TRIM}</strong>
+        </div>
+      </div>
+      {/* Scadenza countdown */}
+      <div style={{ display:"flex",alignItems:"center",gap:10,marginBottom:16,padding:"8px 14px",background:`${scadColor}11`,border:`1.5px solid ${scadColor}33`,borderRadius:8 }}>
+        <span style={{ fontSize:18 }}>{daysLeft<=60?"🔴":daysLeft<=180?"🟡":"🟢"}</span>
+        <div>
+          <span style={{ fontSize:12,fontWeight:700,color:scadColor }}>Scadenza Dir. 2008/9/CE: 30/09/{scadAnno}</span>
+          <span style={{ fontSize:11,color:"#666",marginLeft:10 }}>
+            {daysLeft > 0 ? `${daysLeft} giorni rimasti` : "SCADUTA"}
+          </span>
         </div>
       </div>
 
@@ -1434,6 +1454,8 @@ export default function IberSilosApp() {
     showToast(`Conciliación: ${matched} asociaciones automáticas`);
   };
   const manualReconcile = (movId, invId) => {
+    const conflict = data.movements.find(m => m.id !== movId && m.invoiceId === invId && m.reconciled);
+    if (conflict) { showToast(`⚠ Fattura già riconciliata con mov. ${conflict.date} (${conflict.id.slice(-6)})`, "err"); return; }
     const movements = data.movements.map(m => m.id===movId ? {...m, invoiceId:invId, reconciled:true} : m);
     const invoices = data.invoices.map(inv => inv.id===invId ? {...inv, status:"riconciliata"} : inv);
     persist({ ...data, movements, invoices }); setReconcileModal(null); showToast("Conciliación guardada");
@@ -1506,6 +1528,37 @@ export default function IberSilosApp() {
     const csv = rows.map(r => r.map(v=>`"${String(v).replace(/"/g,'""')}"`).join(",")).join("\n");
     const blob = new Blob([csv],{type:"text/csv;charset=utf-8;"}); const a=document.createElement("a"); a.href=URL.createObjectURL(blob); a.download=`libro-diario-${today()}.csv`; a.click();
     showToast("Libro Diario exportado");
+  };
+
+  const exportAnnoCSV = () => {
+    const ejFound = EJERCICIOS.find(e=>e.id===ejercicio&&e.id!=="todos");
+    const ej = ejFound || EJERCICIOS.find(e=>e.id==="EF2") || EJERCICIOS[1];
+    const label = ejFound ? ej.id : "ALL";
+    const dlCSV = (rows, filename) => {
+      const csv = rows.map(r=>r.map(v=>`"${String(v||"").replace(/"/g,'""')}"`).join(";")).join("\n");
+      const blob = new Blob(["﻿"+csv],{type:"text/csv;charset=utf-8;"});
+      const a = document.createElement("a"); a.href=URL.createObjectURL(blob); a.download=filename; a.click();
+      setTimeout(()=>URL.revokeObjectURL(a.href),400);
+    };
+    const invs = data.invoices.filter(i=>{ const d=i.fechaOperacion||i.date||""; return d>=ej.from&&d<=ej.to; });
+    dlCSV([
+      ["ID","Tipo","N°","Fecha","Vencimiento","Contraparte","Descripción","Base (€)","IVA (€)","Total (€)","Tipo IVA","Paese IVA","IVA Estera (€)","Estado"],
+      ...invs.map(i=>[i.id,i.type,i.number||"",i.date||"",i.dueDate||"",
+        i.type==="emessa"?i.client||"":i.supplier||"",i.description||"",
+        (parseFloat(i.netAmount)||0).toFixed(2).replace(".",","),
+        (parseFloat(i.ivaAmount)||0).toFixed(2).replace(".",","),
+        (parseFloat(i.grossAmount)||0).toFixed(2).replace(".",","),
+        i.ivaType||"",i.paisIvaOrigen||"ES",
+        (parseFloat(i.ivaEsteraAmount)||0).toFixed(2).replace(".",","),i.status||""])
+    ], `IberSilos_Facturas_${label}_${today()}.csv`);
+    const movs = data.movements.filter(m=>{ const d=m.date||""; return d>=ej.from&&d<=ej.to; });
+    setTimeout(()=>dlCSV([
+      ["ID","Fecha","Tipo","Descripción","Importe (€)","Cuenta","Reconciliado","Factura ID"],
+      ...movs.map(m=>[m.id,m.date||"",m.type||"",m.description||"",
+        (parseFloat(m.amount)||0).toFixed(2).replace(".",","),
+        m.account||"",m.reconciled?"Sí":"No",m.invoiceId||""])
+    ], `IberSilos_Movimientos_${label}_${today()}.csv`), 300);
+    showToast(`✓ Export ${label}: ${invs.length} fatture · ${movs.length} movimenti`);
   };
 
   const exportIvaEsteraCSV = (trimestre) => {
@@ -1708,6 +1761,7 @@ export default function IberSilosApp() {
               </span>
             )}
           </button>
+          <button className="btn-ghost" onClick={exportAnnoCSV} style={{ fontSize:11 }}>↓ CSV</button>
           <button className="btn-ghost" onClick={exportJSON} style={{ fontSize:11 }}>↓ Backup</button>
           <button className="btn-ghost" onClick={() => fileRef.current.click()} style={{ fontSize:11 }}>↑ Importar</button>
           <input ref={fileRef} type="file" accept=".json" onChange={importJSON} style={{ display:"none" }} />
