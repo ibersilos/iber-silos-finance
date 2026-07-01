@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef, useMemo } from "react";
+import React, { useState, useEffect, useCallback, useRef, useMemo, Component } from "react";
 import { LineChart, Line, BarChart, Bar, Cell, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, ReferenceLine } from "recharts";
 
 // ── CONSTANTS ─────────────────────────────────────────────────────────────────
@@ -1330,7 +1330,7 @@ function AcciseGasolioTab({ data, persist }) {
   );
 }
 
-class TabErrorBoundary extends React.Component {
+class TabErrorBoundary extends Component {
   constructor(props) { super(props); this.state = { hasError: false, error: null }; }
   static getDerivedStateFromError(e) { return { hasError: true, error: e }; }
   componentDidUpdate(prev) { if (prev.tabKey !== this.props.tabKey) this.setState({ hasError: false, error: null }); }
