@@ -1,19 +1,16 @@
 {
   "VWCE": {
-    "price": 164.82,
-    "change_pct": -1.07
+    "error": "Failed to perform, curl: (28) Operation timed out after 30002 milliseconds with 0 bytes received. See https://curl.se/libcurl/c/libcurl-errors.html first for more details."
   },
   "VUAA": {
-    "price": 126.45,
-    "change_pct": -0.74
+    "error": "Failed to perform, curl: (28) Operation timed out after 30002 milliseconds with 0 bytes received. See https://curl.se/libcurl/c/libcurl-errors.html first for more details."
   },
   "SEC0": {
-    "price": 17.82,
-    "change_pct": -8.22
+    "error": "no data"
   },
   "C50": {
     "price": 169.76,
     "change_pct": -0.98
   },
-  "_updated": "2026-07-07T18:28:41Z"
+  "_updated": "2026-07-07T20:30:21Z"
 }
