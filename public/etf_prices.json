@@ -1,17 +1,19 @@
 {
   "VWCE": {
-    "error": "Failed to perform, curl: (60) SSL: no alternative certificate subject name matches target hostname 'fc.yahoo.com'. See https://curl.se/libcurl/c/libcurl-errors.html first for more details."
+    "price": 164.4,
+    "change_pct": -0.25
   },
   "VUAA": {
-    "error": "Failed to perform, curl: (60) SSL: no alternative certificate subject name matches target hostname 'fc.yahoo.com'. See https://curl.se/libcurl/c/libcurl-errors.html first for more details."
+    "price": 126.31,
+    "change_pct": -0.11
   },
   "SEC0": {
-    "price": 17.82,
-    "change_pct": 0.01
+    "price": 18.32,
+    "change_pct": 2.82
   },
   "C50": {
-    "price": 166.96,
-    "change_pct": -1.65
+    "price": 167.3,
+    "change_pct": -1.45
   },
-  "_updated": "2026-07-08T12:03:28Z"
+  "_updated": "2026-07-08T14:40:18Z"
 }
