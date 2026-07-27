@@ -444,7 +444,7 @@ function FattureAperteModal({ invoices, onClose }) {
             <table>
               <thead><tr><th>N°</th><th>Fecha</th><th>Venc.</th><th>Cliente</th><th style={{ textAlign:"right" }}>Total</th><th>Note</th></tr></thead>
               <tbody>
-                {[...emesseAperte].sort((a,b) => (a.dueDate||a.date).localeCompare(b.dueDate||b.date)).map(inv => (
+                {[...emesseAperte].sort((a,b) => (a.dueDate||a.date||"").localeCompare(b.dueDate||b.date||"")).map(inv => (
                   <tr key={inv.id} style={rowStyle(inv)}>
                     <td style={{ fontWeight:700, color:"#E30613" }}>{inv.number || "—"}</td>
                     <td style={{ color:"#999", fontSize:12 }}>{fmtDate(inv.date)}</td>
@@ -471,7 +471,7 @@ function FattureAperteModal({ invoices, onClose }) {
             <table>
               <thead><tr><th>N°</th><th>Fecha</th><th>Venc.</th><th>Proveedor</th><th style={{ textAlign:"right" }}>Total</th><th>Note</th></tr></thead>
               <tbody>
-                {[...ricevuteAperte].sort((a,b) => (a.dueDate||a.date).localeCompare(b.dueDate||b.date)).map(inv => (
+                {[...ricevuteAperte].sort((a,b) => (a.dueDate||a.date||"").localeCompare(b.dueDate||b.date||"")).map(inv => (
                   <tr key={inv.id} style={rowStyle(inv)}>
                     <td style={{ fontWeight:700, color:"#E30613" }}>{inv.number || "—"}</td>
                     <td style={{ color:"#999", fontSize:12 }}>{fmtDate(inv.date)}</td>
