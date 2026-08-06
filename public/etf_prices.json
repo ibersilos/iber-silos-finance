@@ -1,19 +1,19 @@
 {
   "VWCE": {
-    "price": NaN,
-    "change_pct": NaN
+    "price": 168.04,
+    "change_pct": 0.0
   },
   "VUAA": {
-    "price": NaN,
-    "change_pct": NaN
+    "price": 129.57,
+    "change_pct": 0.0
   },
   "SEC0": {
-    "price": NaN,
-    "change_pct": NaN
+    "price": 17.3,
+    "change_pct": 0.0
   },
   "C50": {
-    "price": NaN,
-    "change_pct": NaN
+    "price": 173.94,
+    "change_pct": 0.0
   },
-  "_updated": "2026-08-06T04:29:36Z"
+  "_updated": "2026-08-06T07:18:57Z"
 }
