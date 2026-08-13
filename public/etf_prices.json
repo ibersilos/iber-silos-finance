@@ -4,16 +4,16 @@
     "change_pct": 0.0
   },
   "VUAA": {
-    "price": 130.33,
-    "change_pct": 0.0
+    "price": NaN,
+    "change_pct": NaN
   },
   "SEC0": {
-    "price": 18.09,
-    "change_pct": 0.0
+    "price": NaN,
+    "change_pct": NaN
   },
   "C50": {
-    "price": 175.9,
-    "change_pct": 0.0
+    "price": NaN,
+    "change_pct": NaN
   },
-  "_updated": "2026-08-13T21:01:26Z"
+  "_updated": "2026-08-13T22:01:39Z"
 }
