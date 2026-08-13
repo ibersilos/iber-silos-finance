@@ -1,7 +1,7 @@
 {
   "VWCE": {
-    "price": 169.62,
-    "change_pct": 0.0
+    "price": NaN,
+    "change_pct": NaN
   },
   "VUAA": {
     "price": NaN,
@@ -15,5 +15,5 @@
     "price": NaN,
     "change_pct": NaN
   },
-  "_updated": "2026-08-13T22:01:39Z"
+  "_updated": "2026-08-13T23:00:36Z"
 }
