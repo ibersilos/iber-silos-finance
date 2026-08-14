@@ -1,6 +1,7 @@
 {
   "VWCE": {
-    "error": "Too Many Requests. Rate limited. Try after a while."
+    "price": NaN,
+    "change_pct": NaN
   },
   "VUAA": {
     "price": NaN,
@@ -14,5 +15,5 @@
     "price": NaN,
     "change_pct": NaN
   },
-  "_updated": "2026-08-14T22:17:05Z"
+  "_updated": "2026-08-14T22:47:55Z"
 }
