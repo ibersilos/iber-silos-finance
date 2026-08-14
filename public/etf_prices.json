@@ -1,19 +1,18 @@
 {
   "VWCE": {
-    "price": 168.88,
-    "change_pct": -0.44
+    "error": "Too Many Requests. Rate limited. Try after a while."
   },
   "VUAA": {
-    "price": 129.83,
-    "change_pct": -0.38
+    "price": NaN,
+    "change_pct": NaN
   },
   "SEC0": {
-    "price": 17.61,
-    "change_pct": -2.64
+    "price": NaN,
+    "change_pct": NaN
   },
   "C50": {
-    "price": 175.66,
-    "change_pct": -0.14
+    "price": NaN,
+    "change_pct": NaN
   },
-  "_updated": "2026-08-14T21:48:37Z"
+  "_updated": "2026-08-14T22:17:05Z"
 }
