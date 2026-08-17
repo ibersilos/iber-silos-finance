@@ -1,19 +1,19 @@
 {
   "VWCE": {
-    "price": 169.18,
-    "change_pct": 0.18
+    "price": 169.14,
+    "change_pct": 0.15
   },
   "VUAA": {
-    "price": 129.96,
-    "change_pct": 0.1
+    "price": 129.9,
+    "change_pct": 0.05
   },
   "SEC0": {
-    "price": 18.03,
-    "change_pct": 2.37
+    "price": 17.99,
+    "change_pct": 2.15
   },
   "C50": {
-    "price": 176.22,
-    "change_pct": 0.32
+    "price": 175.88,
+    "change_pct": 0.13
   },
-  "_updated": "2026-08-17T11:51:13Z"
+  "_updated": "2026-08-17T12:33:36Z"
 }
