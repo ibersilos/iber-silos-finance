@@ -1,6 +1,7 @@
 {
   "VWCE": {
-    "error": "Too Many Requests. Rate limited. Try after a while."
+    "price": 166.3,
+    "change_pct": 0.0
   },
   "VUAA": {
     "price": 126.96,
@@ -14,5 +15,5 @@
     "price": 173.54,
     "change_pct": 0.0
   },
-  "_updated": "2026-08-25T19:54:10Z"
+  "_updated": "2026-08-25T20:22:29Z"
 }
