@@ -966,6 +966,150 @@ function IvaEsteraTab({ data, persist, ejercicio, EJERCICIOS, exportIvaEsteraCSV
   );
 }
 
+// ── IVA ESPAÑA TAB (Modelo 303 — repercutido/soportado) ────────────────────────
+function IvaEspanaTab({ data, ejercicio, EJERCICIOS }) {
+  const ej   = EJERCICIOS.find(e=>e.id===ejercicio) || EJERCICIOS[1];
+  const anno = ej.from.slice(0,4);
+
+  const trimestri = [
+    { id:"T1", label:"T1 Gen–Mar" },
+    { id:"T2", label:"T2 Apr–Giu" },
+    { id:"T3", label:"T3 Lug–Set" },
+    { id:"T4", label:"T4 Ott–Dic" },
+  ];
+
+  // Reverse charge / autorepercusión: soportado=repercutido, effetto netto zero — escluso dal calcolo
+  const isRC = (inv) => /rc\b|reverse|autorepercus/i.test(inv.ivaType || "");
+
+  const calc = useMemo(() => {
+    const byTrim = {};
+    trimestri.forEach(t => { byTrim[t.id] = { repercutido:0, soportado:0 }; });
+    let totRepercutido = 0, totSoportado = 0;
+
+    data.invoices.forEach(inv => {
+      const d = inv.fechaOperacion || inv.date || "";
+      if (!d || d < ej.from || d > ej.to) return;
+      const iva = parseFloat(inv.ivaAmount) || 0;
+      if (iva <= 0 || isRC(inv)) return;
+      const mo = parseInt(d.slice(5,7));
+      const t  = mo<=3?"T1":mo<=6?"T2":mo<=9?"T3":"T4";
+      if (inv.type === "emessa") {
+        byTrim[t].repercutido += iva; totRepercutido += iva;
+      } else if (inv.type === "ricevuta" && (!inv.paisIvaOrigen || inv.paisIvaOrigen === "ES")) {
+        byTrim[t].soportado += iva; totSoportado += iva;
+      }
+    });
+    return { byTrim, totRepercutido, totSoportado, resultado: totRepercutido - totSoportado };
+  }, [data.invoices, ejercicio]);
+
+  const fmtN = v => new Intl.NumberFormat("es-ES",{style:"currency",currency:"EUR",minimumFractionDigits:2}).format(v||0);
+  const resColor = calc.resultado >= 0 ? "#E30613" : "#28a745"; // positivo = a ingresar, negativo = a compensar/devolver
+
+  return (
+    <div>
+      <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12 }}>
+        <div className="section-title">IVA España — Modelo 303</div>
+        <div style={{ fontSize:11,color:"#999",fontFamily:"'IBM Plex Mono',monospace" }}>
+          IVA ordinaria 21% · presentación trimestral (20 días tras fin trimestre)
+        </div>
+      </div>
+
+      <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:14,marginBottom:20 }}>
+        <div className="kpi-card" style={{ borderLeftColor:"#3949ab" }}>
+          <div className="kpi-label">IVA Repercutido {anno}</div>
+          <div className="kpi-value" style={{ color:"#3949ab" }}>{fmtN(calc.totRepercutido)}</div>
+          <div style={{ fontSize:10,color:"#bbb",marginTop:4 }}>Ventas con IVA (facturas emitidas)</div>
+        </div>
+        <div className="kpi-card" style={{ borderLeftColor:"#b8860b" }}>
+          <div className="kpi-label">IVA Soportado {anno}</div>
+          <div className="kpi-value" style={{ color:"#b8860b" }}>{fmtN(calc.totSoportado)}</div>
+          <div style={{ fontSize:10,color:"#bbb",marginTop:4 }}>Compras deducibles ES (facturas recibidas)</div>
+        </div>
+        <div className="kpi-card" style={{ borderLeftColor: resColor }}>
+          <div className="kpi-label">Resultado Modelo 303</div>
+          <div className="kpi-value" style={{ color: resColor }}>{fmtN(calc.resultado)}</div>
+          <div style={{ fontSize:10,color:"#bbb",marginTop:4 }}>
+            {calc.resultado >= 0 ? "A ingresar a Hacienda" : "A compensar / devolver"}
+          </div>
+        </div>
+      </div>
+
+      <div className="card" style={{ marginBottom:20 }}>
+        <div style={{ fontSize:10,fontWeight:700,letterSpacing:"1.5px",textTransform:"uppercase",color:"#bbb",marginBottom:14 }}>
+          Dettaglio trimestrale {anno}
+        </div>
+        <table>
+          <thead>
+            <tr>
+              <th>Trimestre</th>
+              <th style={{textAlign:"right"}}>Repercutido</th>
+              <th style={{textAlign:"right"}}>Soportado</th>
+              <th style={{textAlign:"right"}}>Resultado</th>
+            </tr>
+          </thead>
+          <tbody>
+            {trimestri.map(t => {
+              const row = calc.byTrim[t.id];
+              const res = row.repercutido - row.soportado;
+              const hasData = row.repercutido || row.soportado;
+              return (
+                <tr key={t.id}>
+                  <td style={{fontWeight:700}}>{t.label}</td>
+                  <td style={{textAlign:"right",fontFamily:"'IBM Plex Mono',monospace",color:row.repercutido>0?"#1A1A1A":"#ddd"}}>
+                    {row.repercutido>0 ? fmtN(row.repercutido) : "—"}
+                  </td>
+                  <td style={{textAlign:"right",fontFamily:"'IBM Plex Mono',monospace",color:row.soportado>0?"#1A1A1A":"#ddd"}}>
+                    {row.soportado>0 ? fmtN(row.soportado) : "—"}
+                  </td>
+                  <td style={{textAlign:"right",fontFamily:"'IBM Plex Mono',monospace",fontWeight:800,
+                    color: hasData ? (res>=0?"#E30613":"#28a745") : "#ddd"}}>
+                    {hasData ? fmtN(res) : "—"}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+          <tfoot>
+            <tr style={{background:"#FAFAFA"}}>
+              <td style={{fontWeight:800,fontSize:12,textTransform:"uppercase",letterSpacing:"0.5px"}}>Totale {anno}</td>
+              <td style={{textAlign:"right",fontFamily:"'IBM Plex Mono',monospace",fontWeight:800}}>{fmtN(calc.totRepercutido)}</td>
+              <td style={{textAlign:"right",fontFamily:"'IBM Plex Mono',monospace",fontWeight:800}}>{fmtN(calc.totSoportado)}</td>
+              <td style={{textAlign:"right",fontFamily:"'IBM Plex Mono',monospace",fontWeight:900,color:resColor,fontSize:15}}>{fmtN(calc.resultado)}</td>
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+
+      <div style={{ fontSize:11,color:"#999",padding:"8px 4px" }}>
+        ℹ️ Le operazioni con reverse charge/autorepercusión (art.196, art.41 D.L.331/93, ecc.) hanno soportado=repercutido e non compaiono qui (effetto netto zero sul risultato), ma vanno comunque dichiarate nelle caselle apposite del modello 303 — verificare con La Clau.
+      </div>
+    </div>
+  );
+}
+
+// ── IVA TAB (wrapper: Estera / España) ─────────────────────────────────────────
+function IvaTab({ data, persist, ejercicio, EJERCICIOS, exportIvaEsteraCSV }) {
+  const [sub, setSub] = useState("estera");
+  return (
+    <div>
+      <div style={{ display:"flex", gap:6, marginBottom:16 }}>
+        {[["estera","IVA Estera"],["espana","IVA España"]].map(([id,label]) => (
+          <button key={id} onClick={()=>setSub(id)}
+            style={{ fontSize:12,padding:"6px 16px",borderRadius:20,border:"1.5px solid",cursor:"pointer",
+              fontWeight:700,transition:"all 0.15s",
+              background:sub===id?"#E30613":"white",
+              color:sub===id?"white":"#666",
+              borderColor:sub===id?"#E30613":"#E0E0E0" }}>
+            {label}
+          </button>
+        ))}
+      </div>
+      {sub==="estera" && <IvaEsteraTab data={data} persist={persist} ejercicio={ejercicio} EJERCICIOS={EJERCICIOS} exportIvaEsteraCSV={exportIvaEsteraCSV} />}
+      {sub==="espana" && <IvaEspanaTab data={data} ejercicio={ejercicio} EJERCICIOS={EJERCICIOS} />}
+    </div>
+  );
+}
+
 // ── ACCISE GASOLIO TAB ────────────────────────────────────────────────────────
 const ACCISE_STATUS_OPTS = [
   { id:"pending",                             label:"Por iniciar",        color:"#999",    bg:"#F5F5F5" },
@@ -998,21 +1142,21 @@ const ACCISE_PAESI = [
   },
   {
     code:"DE", flag:"🇩🇪", label:"Alemania",
-    organismo:"Hauptzollamt — Bundeszollverwaltung",
-    aliquota2026: 214.80,          // €/1000L — §57 EnergieStG 2026 (era 64.44 nel 2025)
-    aliquotaNote: "214.80 €/kL desde 01/01/2026 (§57 EnergieStG) — era 64.44 en 2025",
-    normativa:"§ 57 Energiesteuergesetz (EnergieStG)",
-    periodicita:"Anual",
-    scadenzaInvio:"31/12 año siguiente",
+    organismo:"—",
+    aliquota2026: 0,               // 🔴 CORREGIDO 28/07/2026: no existe devolución para transporte comercial
+    aliquotaNote: "SIN DEVOLUCIÓN — §55 EnergieStG derogado; §57 es Agrardiesel (agricultura/silvicultura), NO transporte de mercancías. El sector (BGL/bdo) reclama un \"Gewerbediesel\" que aún no existe. El valor anterior (214.80/64.44 €/kL) era el tipo agrícola, aplicado por error.",
+    normativa:"Ninguna — sin base legal para transporte comercial",
+    periodicita:"N/A",
+    scadenzaInvio:"N/A — no presentar expediente",
   },
   {
     code:"ES", flag:"🇪🇸", label:"España",
-    organismo:"AEAT — Agencia Estatal de Administración Tributaria",
+    organismo:"AEAT — Agencia Estatal de Administración Tributaria (gestión: Gestrams)",
     aliquota2026: 49.00,           // €/1000L — tasso fisso da 2019; aiuto straord. +200 €/kL mar-giu 2026
-    aliquotaNote: "49.00 €/kL fijo (desde 2019) + 200 €/kL ayuda extraord. 22/03–30/06/2026",
-    normativa:"Ley 38/1992 — Impuestos Especiales",
-    periodicita:"Anual (km recorridos año anterior)",
-    scadenzaInvio:"31/03 año siguiente",
+    aliquotaNote: "49.00 €/kL fijo (desde 2019) + 200 €/kL ayuda extraord. 22/03–30/06/2026. Gestionado por Gestrams (no La Clau).",
+    normativa:"Ley 38/1992 — Impuestos Especiales, art. 52 bis",
+    periodicita:"Mensual automático (vía tarjeta gasóleo profesional)",
+    scadenzaInvio:"Requiere inscripción previa en el Censo de beneficiarios — sin inscripción, devolución = 0 independientemente de los litros",
   },
 ];
 
@@ -1695,7 +1839,7 @@ export default function IberSilosApp() {
     { id:"forecast",     label:"Forecast",     icon: <svg viewBox="0 0 24 24" width={16} height={16} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/></svg> },
     { id:"ibkr",         label:"IBKR SL",      icon: <svg viewBox="0 0 24 24" width={16} height={16} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg> },
     { id:"contabilidad", label:"Contabilidad", icon: <svg viewBox="0 0 24 24" width={16} height={16} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg> },
-    { id:"iva_estera",   label:"IVA Estera",   icon: <svg viewBox="0 0 24 24" width={16} height={16} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg> },
+    { id:"iva_estera",   label:"IVA",   icon: <svg viewBox="0 0 24 24" width={16} height={16} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg> },
     { id:"accise_gasolio", label:"Accise Gasolio", icon: <svg viewBox="0 0 24 24" width={16} height={16} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 22V8l9-6 9 6v14"/><path d="M9 22V12h6v10"/><path d="M14 6.5v2"/></svg> },
   ];
 
@@ -1888,7 +2032,7 @@ export default function IberSilosApp() {
 
           {tab==="ibkr" && <IbkrTab data={data} setIbkrModal={setIbkrModal} deleteIbkr={deleteIbkr} ibkrLive={ibkrLive} onRefresh={fetchIbkrPrices} />}
           {tab==="contabilidad" && <ContabilidadTab data={data} persist={persist} contabView={contabView} setContabView={setContabView} mayorCuenta={mayorCuenta} setMayorCuenta={setMayorCuenta} setAsientoModal={setAsientoModal} deleteAsiento={deleteAsiento} exportContabCSV={exportContabCSV} />}
-          {tab==="iva_estera" && <IvaEsteraTab data={data} persist={persist} ejercicio={ejercicio} EJERCICIOS={EJERCICIOS} exportIvaEsteraCSV={exportIvaEsteraCSV} />}
+          {tab==="iva_estera" && <IvaTab data={data} persist={persist} ejercicio={ejercicio} EJERCICIOS={EJERCICIOS} exportIvaEsteraCSV={exportIvaEsteraCSV} />}
           {tab==="accise_gasolio" && <AcciseGasolioTab data={data} persist={persist} />}
           </TabErrorBoundary>
         </div>
