@@ -627,8 +627,19 @@ const IVA_STATUS_OPTS = [
   { id:"pending",  label:"Da avviare",   color:"#999",    bg:"#F5F5F5" },
   { id:"open",     label:"Pratica aperta", color:"#b8860b", bg:"#fffde7" },
   { id:"sent",     label:"Inviata",      color:"#3949ab", bg:"#e8eaf6" },
+  { id:"partial",  label:"Rimborsata in parte ✓", color:"#2e7d32", bg:"#e8f5e9" },
   { id:"received", label:"Ricevuta ✓",   color:"#28a745", bg:"#e8f5e9" },
 ];
+
+// Unica fonte per lo stato dei rimborsi IVA estera: pratiche_recupero.iva_extranjero.domande (usata da dashboard e pagina IVA)
+function riepilogoDomande(data, paese, maturato) {
+  const dp = (data.pratiche_recupero?.iva_extranjero?.domande || []).filter(x => x.paese === paese);
+  const rimborsato = dp.filter(x => x.stato === "rimborsata").reduce((s,x) => s + (parseFloat(x.ricevuto)||0), 0);
+  const inAttesa = dp.filter(x => x.stato === "presentata").reduce((s,x) => s + (parseFloat(x.richiesto)||0), 0);
+  const coperto = dp.reduce((s,x) => s + (parseFloat(x.richiesto)||0), 0);
+  const ultima = dp.map(x => x.data_presentazione || "").sort().pop() || "";
+  return { n: dp.length, rimborsato, inAttesa, daRichiedere: Math.max(0, (maturato||0) - coperto), ultima };
+}
 
 function IvaEsteraStatusModal({ paese, status, onClose, onSave }) {
   const pi = PAESI_INFO.find(p => p.code === paese);
@@ -711,7 +722,11 @@ function IvaEsteraTab({ data, persist, ejercicio, EJERCICIOS, exportIvaEsteraCSV
 
   const getStatus = (paese) => {
     const key = `${ej.id}_${paese}`;
-    return data.ivaEsteraStatus?.[key] || { stato:"pending", dataInvio:"", importoRicevuto:"", note:"" };
+    const manual = data.ivaEsteraStatus?.[key] || { stato:"pending", dataInvio:"", importoRicevuto:"", note:"" };
+    const r = riepilogoDomande(data, paese, calc.byPaese[paese]?.tot || 0);
+    if (!r.n) return manual;
+    const stato = r.inAttesa > 0 ? "sent" : r.rimborsato > 0 ? (r.daRichiedere > 0.5 ? "partial" : "received") : manual.stato;
+    return { ...manual, stato, dataInvio: r.ultima || manual.dataInvio, importoRicevuto: r.rimborsato || manual.importoRicevuto };
   };
 
   const saveStatus = (paese, updates) => {
@@ -812,6 +827,11 @@ function IvaEsteraTab({ data, persist, ejercicio, EJERCICIOS, exportIvaEsteraCSV
                   {stOpt.label}
                 </span>
               </div>
+              {totPaese > 0 && (() => { const r = riepilogoDomande(data, paese.code, totPaese); return r.n > 0 && (
+                <div style={{ fontSize:9,color:"#666",lineHeight:1.4,marginBottom:6,fontWeight:700 }}>
+                  Devuelto {fmtN(r.rimborsato)}<br/>Por solicitar {fmtN(r.daRichiedere)}
+                </div>
+              ); })()}
               {totPaese > 0 && (
                 <div style={{ fontSize:9,color:"#bbb",lineHeight:1.4 }}>
                   {okTrim ? <span style={{color:"#3949ab"}}>✓ &gt;€{IVA_ESTERA_SOGLIA_TRIM} trim.</span> : <span>⚠ &lt;€{IVA_ESTERA_SOGLIA_TRIM} trim.</span>}<br/>
@@ -2185,15 +2205,8 @@ function IvaResumenCard({ metrics, data, ejercicio, EJERCICIOS, onDetail }) {
     totEstera += a;
     maturato[inv.paisIvaOrigen] = (maturato[inv.paisIvaOrigen]||0) + a;
   });
-  const domande = data.pratiche_recupero?.iva_extranjero?.domande || [];
-  const statiPaese = PAESI.map(p => {
-    const dp = domande.filter(x => x.paese===p);
-    const rimborsato = dp.filter(x => x.stato==="rimborsata").reduce((s,x)=>s+(parseFloat(x.ricevuto)||0),0);
-    const inAttesa = dp.filter(x => x.stato==="presentata").reduce((s,x)=>s+(parseFloat(x.richiesto)||0),0);
-    const coperto = dp.reduce((s,x)=>s+(parseFloat(x.richiesto)||0),0);
-    const daRichiedere = Math.max(0, (maturato[p]||0) - coperto);
-    return { p, rimborsato, inAttesa, daRichiedere, mat: maturato[p]||0 };
-  }).filter(r => r.mat>0 || r.rimborsato>0 || r.inAttesa>0);
+  const statiPaese = PAESI.map(p => ({ p, mat: maturato[p]||0, ...riepilogoDomande(data, p, maturato[p]||0) }))
+    .filter(r => r.mat>0 || r.rimborsato>0 || r.inAttesa>0);
 
   return (
     <div className="card" style={{ marginBottom:16, borderLeft:"4px solid #3949ab" }}>
