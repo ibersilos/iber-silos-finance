@@ -2174,14 +2174,26 @@ function IvaResumenCard({ metrics, data, ejercicio, EJERCICIOS, onDetail }) {
   const ej = EJERCICIOS.find(e=>e.id===ejercicio)||EJERCICIOS[1];
   const PAESI = ["IT","FR","DE","AT","BE"];
   let totEstera = 0;
+  const maturato = {};
   data.invoices.forEach(inv => {
     if (inv.type !== "ricevuta") return;
     const d = inv.fechaOperacion||inv.date||"";
     if (!d || d<ej.from || d>ej.to) return;
     if (!inv.paisIvaOrigen || inv.paisIvaOrigen==="ES") return;
     if (!PAESI.includes(inv.paisIvaOrigen)) return;
-    totEstera += parseFloat(inv.ivaEsteraAmount)||0;
+    const a = parseFloat(inv.ivaEsteraAmount)||0;
+    totEstera += a;
+    maturato[inv.paisIvaOrigen] = (maturato[inv.paisIvaOrigen]||0) + a;
   });
+  const domande = data.pratiche_recupero?.iva_extranjero?.domande || [];
+  const statiPaese = PAESI.map(p => {
+    const dp = domande.filter(x => x.paese===p);
+    const rimborsato = dp.filter(x => x.stato==="rimborsata").reduce((s,x)=>s+(parseFloat(x.ricevuto)||0),0);
+    const inAttesa = dp.filter(x => x.stato==="presentata").reduce((s,x)=>s+(parseFloat(x.richiesto)||0),0);
+    const coperto = dp.reduce((s,x)=>s+(parseFloat(x.richiesto)||0),0);
+    const daRichiedere = Math.max(0, (maturato[p]||0) - coperto);
+    return { p, rimborsato, inAttesa, daRichiedere, mat: maturato[p]||0 };
+  }).filter(r => r.mat>0 || r.rimborsato>0 || r.inAttesa>0);
 
   return (
     <div className="card" style={{ marginBottom:16, borderLeft:"4px solid #3949ab" }}>
@@ -2203,10 +2215,29 @@ function IvaResumenCard({ metrics, data, ejercicio, EJERCICIOS, onDetail }) {
           <div style={{ fontSize:10,color:ivaEsteraRecuperata>0?"#28a745":"#bbb",marginTop:2,fontWeight:700 }}>{ivaEsteraRecuperata>0?"✓ devolución recibida":"pendiente de devolución"}</div>
         </div>
         <div style={{ textAlign:"center",padding:"10px",background:totEstera>=IVA_ESTERA_SOGLIA_ANNUA?"#e8f5e9":"#fffde7",borderRadius:8,border:`1.5px solid ${totEstera>=IVA_ESTERA_SOGLIA_ANNUA?"#a5d6a7":"#ffe082"}` }}>
-          <div style={{ fontSize:10,color:"#bbb",fontWeight:700,textTransform:"uppercase",letterSpacing:"0.1em",marginBottom:4 }}>IVA Exterior recuperable</div>
-          <div style={{ fontSize:24,fontWeight:900,color:totEstera>=IVA_ESTERA_SOGLIA_ANNUA?"#28a745":"#b8860b" }}>{fmt(totEstera)}</div>
-          <div style={{ fontSize:10,color:totEstera>=IVA_ESTERA_SOGLIA_ANNUA?"#28a745":"#b8860b",marginTop:2,fontWeight:700 }}>
-            {totEstera>=IVA_ESTERA_SOGLIA_ANNUA?"✓ umbral anual ✓":"⚠ bajo umbral €50"}
+          <div style={{ fontSize:10,color:"#bbb",fontWeight:700,textTransform:"uppercase",letterSpacing:"0.1em",marginBottom:6 }}>IVA Exterior por país</div>
+          <table style={{ width:"100%",fontSize:11,borderCollapse:"collapse" }}>
+            <thead>
+              <tr style={{ color:"#999",fontSize:9,textTransform:"uppercase" }}>
+                <th style={{ textAlign:"left",fontWeight:700 }}></th>
+                <th style={{ textAlign:"right",fontWeight:700 }}>Devuelto</th>
+                <th style={{ textAlign:"right",fontWeight:700 }}>Solicitado</th>
+                <th style={{ textAlign:"right",fontWeight:700 }}>Por solicitar</th>
+              </tr>
+            </thead>
+            <tbody>
+              {statiPaese.map(r => (
+                <tr key={r.p}>
+                  <td style={{ textAlign:"left",fontWeight:800 }}>{r.p}</td>
+                  <td style={{ textAlign:"right",color:r.rimborsato>0?"#28a745":"#bbb",fontWeight:700 }}>{fmt(r.rimborsato)}</td>
+                  <td style={{ textAlign:"right",color:r.inAttesa>0?"#3949ab":"#bbb",fontWeight:700 }}>{fmt(r.inAttesa)}</td>
+                  <td style={{ textAlign:"right",color:r.daRichiedere>0?"#b8860b":"#bbb",fontWeight:700 }}>{fmt(r.daRichiedere)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <div style={{ fontSize:10,color:totEstera>=IVA_ESTERA_SOGLIA_ANNUA?"#28a745":"#b8860b",marginTop:6,fontWeight:700 }}>
+            {`Total recuperable ${fmt(totEstera)}`}{totEstera>=IVA_ESTERA_SOGLIA_ANNUA?" · umbral anual ✓":" · ⚠ bajo umbral €50"}
           </div>
         </div>
       </div>
